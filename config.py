@@ -1,7 +1,14 @@
 import os
 
+try:
+    from hoshino.log import _info_log_file
+    # 自动获取HoshinoBot的日志文件路径
+    LOG_PATH = os.path.abspath(_info_log_file)
+except ImportError:
+    # 兜底方案，如果获取失败则需要手动指定
+    LOG_PATH = '' # 如果自动获取失败，请在这里手动填写 run.py 所在目录下的 log/info.log 的绝对路径
+
 # 基本配置
-LOG_PATH = '/path/to/your/log'  # 系统日志路径，请修改为实际路径
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 
 # 定时任务配置
@@ -11,7 +18,7 @@ SUMMARY_HOUR_NIGHT = 0  # 晚上12点进行总结
 
 # AI配置
 AI_API_KEY = ""  # DeepSeek API密钥
-AI_MODEL = "deepseek-reasoner"  # AI模型名称
+AI_MODEL = "deepseek-v3"  # AI模型名称
 AI_TEMPERATURE = 0.7  # AI生成温度
 
 # 提示词配置
@@ -21,11 +28,10 @@ PROMPT_TEMPLATE = """请根据【{group_name}】今天的聊天记录，整理�
 2. **重要消息**（活动通知、截止时间等）  
 3. **金句/趣图**（摘录精彩内容）  
 
-最后，用分块布局（类似苹果发布会的Bento Grid风格）生成HTML，方便阅读。
-
 聊天记录：
 {chat_log}
 """
+# 最后，用分块布局（类似苹果发布会的Bento Grid风格）生成HTML，方便阅读。
 
 # 图片生成配置
 HTML_TEMPLATE = """
