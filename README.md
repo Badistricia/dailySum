@@ -63,7 +63,7 @@ pip install httpx pillow html2image
 
 ```bash
 cd path/to/HoshinoBot/hoshino/modules/dailySum
-python3 diagnostic.py
+python3 _diagnostic.py
 ```
 
 诊断工具会检查以下内容：
