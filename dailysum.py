@@ -17,10 +17,11 @@ if sys.version_info < (3, 9):
     list = typing.List
     dict = typing.Dict
 
-import html2image
+# import html2image # 已禁用
 from apscheduler.triggers.cron import CronTrigger
+from nonebot import scheduler
 
-from hoshino import Service, priv, logger
+from hoshino import Service, priv, logger, get_bot
 from .config import *
 from .logger_helper import log_debug, log_info, log_warning, log_error_msg, log_critical, logged
 
@@ -381,22 +382,11 @@ def start_scheduler(sv: Service):
     
     log_info("开始启动群聊日报定时任务")
     
-    # 下午6点任务
-    sv.scheduler.add_job(
-        execute_daily_summary,
-        CronTrigger(hour=SUMMARY_HOUR_AFTERNOON, minute=0),
-        args=(sv.bot,),
-        id='dailysum_afternoon'
-    )
+    bot = get_bot()
+    scheduler.add_job(execute_daily_summary, CronTrigger(hour=SUMMARY_HOUR_AFTERNOON, minute=0), args=(bot,), id='dailysum_afternoon')
     log_info(f"已添加下午 {SUMMARY_HOUR_AFTERNOON}:00 的定时任务")
     
-    # 晚上12点任务
-    sv.scheduler.add_job(
-        execute_daily_summary,
-        CronTrigger(hour=SUMMARY_HOUR_NIGHT, minute=0),
-        args=(sv.bot,),
-        id='dailysum_night'
-    )
+    scheduler.add_job(execute_daily_summary, CronTrigger(hour=SUMMARY_HOUR_NIGHT, minute=0), args=(bot,), id='dailysum_night')
     log_info(f"已添加晚上 {SUMMARY_HOUR_NIGHT}:00 的定时任务")
     
     log_info('群聊日报定时任务启动完成') 
