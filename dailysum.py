@@ -9,6 +9,14 @@ import httpx
 from PIL import Image
 import io
 import base64
+
+# 猴子补丁，用于修复html2image在Python 3.8下的兼容性问题
+import sys
+if sys.version_info < (3, 9):
+    import typing
+    list = typing.List
+    dict = typing.Dict
+
 import html2image
 from apscheduler.triggers.cron import CronTrigger
 
@@ -233,15 +241,24 @@ def generate_html_content(summary, group_name, date_str):
     log_info(f"开始生成HTML内容，群: {group_name}, 日期: {date_str}")
     log_debug(f"AI摘要长度: {len(summary)}")
     
-    # 将AI输出转换为简单的HTML格式
-    summary_html = summary.replace('\n', '<br>')
-    content = f"""
-    <div class="bento-item large">
-        <h2>AI生成内容</h2>
-        <p>{summary_html}</p>
-    </div>
-    """
-    log_info("将AI文本转换为简单HTML格式")
+    # 从AI输出中提取内容
+    # 这里假设AI已经生成了符合要求的HTML片段
+    if "<div class=\"bento-grid\">" in summary and "</div>" in summary:
+        # 直接提取AI生成的HTML内容
+        start_idx = summary.find("<div class=\"bento-grid\">")
+        end_idx = summary.rfind("</div>") + 6
+        content = summary[start_idx:end_idx]
+        log_info("使用AI直接生成的HTML内容")
+    else:
+        # 将AI输出转换为简单的HTML格式
+        summary_html = summary.replace('\n', '<br>')
+        content = f"""
+        <div class="bento-item large">
+            <h2>AI生成内容</h2>
+            <p>{summary_html}</p>
+        </div>
+        """
+        log_info("将AI文本转换为简单HTML格式")
     
     # 生成完整HTML
     html = HTML_TEMPLATE.format(
