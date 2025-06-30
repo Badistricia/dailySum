@@ -1,0 +1,40 @@
+我现在要做一个插件这个插件可以使用我这个机器人的sys的日志获取到各种各样的群消息并且在并且会根据每日的美食定时分割成一个log文件放到本文件夹的data下然后对这个data进行AI的调用并且生成一个ru TML或者说一个嗯PDF一样的图片总之是要有一对应的排版最终发到群里去
+具体我大概思路是
+1. 你需要去知道如何获取syslog的调用方法,并且可以筛选出真正的群消息而非机器人内部的插件提示信息,筛选出后根据群聊存储这些聊天信息的各种信息比如发出人,发出时间等,
+最终存储在data目录下的一个文件里作为读取,且要根据日期每日进行切换,也可以每天的下午六点进行总结当天的,晚上12点总结当天下午6点到12点的,这个要求可以配置分割频率;且最好有个手动触发的方式,比如手动总结今天六点前的
+群聊信息,这个时候先触发日志分割生成日志文件,然后触发用这个日志文件发给ai总结,最后生成图片发到群里;
+2. 有了数据源之后,需要可以调用ai的api,这个可以参考modules/aichat下的文件,我是打算用deepseek的reasoner进行总结,这个要求也可以配置对应的apikey;
+3. 对应的提示词要求则可以放到代码里,目前给一个参考的:"请根据【群名】今天的聊天记录，整理一份QQ群日报，要求：  
+
+1. **今日热点话题**（总结3-5个最活跃的讨论点）  
+2. **重要消息**（活动通知、截止时间等）  
+3. **金句/趣图**（摘录精彩内容）  
+
+最后，用分块布局（类似苹果发布会的Bento Grid风格）生成X，方便阅读。  "
+4. 上面里的X是表示图片,至于如何生成,我暂时没有头绪,可以通过获取这个HTML生成的网页生成图片,也可以自己去图床网站?我不知道,先推进吧;
+
+以下为附件,内附群聊的日志大致情况:"
+[2025-06-30 16:51:58,015 nonebot] INFO: Self: 1784559591, Message 437930500 from 1241097890@[群:264828488]: '略猫区扳回一城'
+[2025-06-30 16:53:07,512 nonebot] INFO: Self: 1784559591, Message 1345282973 from 1053840905@[群:649387907]: '[CQ:image,summary=,file=35DAF054004F7B97252E8FBFA2744EBC.jpg,sub_type=0,url=https://multimedia.nt.qq.com.cn/download?appid=1407&amp;fileid=EhQIAxHhLtLwj9HVtWGRx6xVzcjKaRimlwYg_woomfqVwOKYjgMyBHByb2RQgL2jAVoQR_FeEE55j1FTmJny3SqAXHoC0ck&amp;rkey=CAESMC0ioki6BRhbvAhpO2Y97GbwraqrQnol9aTBg1QgKJEm696IAciEXUEEQnVTA7xkEg,file_size=101286]'
+[2025-06-30 16:54:14,095 nonebot] INFO: Self: 1784559591, Message 257028674 from 783071451@[群:649387907]: '[CQ:reply,id=1024857048][CQ:at,qq=2235493103] 怎么就南通了'
+[2025-06-30 16:54:21,716 nonebot] INFO: Self: 1784559591, Message 1947410044 from 783071451@[群:649387907]: '[CQ:image,summary=&#91;动画表情&#93;,file=A229C1119A4EE5F676A400A303905BEA.jpg,sub_type=1,url=https://multimedia.nt.qq.com.cn/download?appid=1407&amp;fileid=EhQarmAlfxsIv0UDLByJq7cICOkLtBjQuPQEIP8KKN3NtuPimI4DMgRwcm9kUIC9owFaEKTlnjtp63bK7E_djO9jCqx6AlVM&amp;rkey=CAESMC0ioki6BRhbvAhpO2Y97GbwraqrQnol9aTBg1QgKJEm696IAciEXUEEQnVTA7xkEg,file_size=10296400]'
+[2025-06-30 16:55:10,227 pcr-news-bili] INFO: Scheduled job bili_news_poller start.
+[2025-06-30 16:55:10,383 pcr-news-bili] INFO: 未检索到B服官网新闻更新
+[2025-06-30 16:55:10,383 pcr-news-bili] INFO: Scheduled job bili_news_poller completed.
+[2025-06-30 16:55:10,632 nonebot] INFO: Self: 1784559591, Message 1679793396 from 770168382@[群:952870960]: '[CQ:image,summary=,file=5F88C6291FCEF38CD54EC317A946FF16.gif,sub_type=0,url=https://multimedia.nt.qq.com.cn/download?appid=1407&amp;fileid=EhR6CXDtLfPRuUnLbM8kmAysefQqRBj7-V0g_woojd-K--KYjgMyBHByb2RQgL2jAVoQ4JwV1EsHzW8atzSVvRUucXoCEHQ&amp;rkey=CAESMC0ioki6BRhbvAhpO2Y97GbwraqrQnol9aTBg1QgKJEm696IAciEXUEEQnVTA7xkEg,file_size=1539323]'
+[2025-06-30 16:55:19,903 nonebot] INFO: Self: 1784559591, Message 1113366540 from 3347977962@[群:649387907]: '币币'
+[2025-06-30 16:55:25,002 pcr-comic] INFO: Scheduled job update_seeker start.
+[2025-06-30 16:55:25,458 pcr-comic] INFO: 未检测到官漫更新
+[2025-06-30 16:55:25,459 pcr-comic] INFO: Scheduled job update_seeker completed.
+pwdx 12345[2025-06-30 16:55:34,112 nonebot] INFO: Self: 1784559591, Message 339877240 from 3347977962@[群:688257098]: '你好'
+[2025-06-30 16:55:35,470 nonebot] INFO: Self: 1784559591, Message 1469371350 from 3347977962@[群:688257098]: '我好吗'
+[2025-06-30 16:55:37,175 nonebot] INFO: Self: 1784559591, Message 787063556 from 291004318@[群:952870960]: '[CQ:image,summary=,file={5B3CA3C7-BB9A-F476-76F9-3FFEFBB1092C}.png,sub_type=0,url=https://gchat.qpic.cn/gchatpic_new/0/0-0-5B3CA3C7BB9AF47676F93FFEFBB1092C/0,file_size=405370]'
+[2025-06-30 16:55:40,191 nonebot] INFO: Self: 1784559591, Message 51087200 from 3347977962@[群:688257098]: '我也许好'
+[2025-06-30 16:55:41,804 nonebot] INFO: Self: 1784559591, Message 223392647 from 291004318@[群:952870960]: '[CQ:image,summary=,file={76229154-D3D5-9F64-539F-D183D9046648}.jpg,sub_type=1,url=https://gchat.qpic.cn/gchatpic_new/0/0-0-76229154D3D59F64539FD183D9046648/0,file_size=5342]补吗'
+[2025-06-30 16:55:43,884 nonebot] INFO: Self: 1784559591, Message 71934911 from 3347977962@[群:688257098]: '1111'
+[2025-06-30 16:55:44,533 nonebot] INFO: Self: 1784559591, Message 1691582364 from 438669788@[群:685960161]: '免费十连到几号啊'
+[2025-06-30 16:55:47,646 nonebot] INFO: Self: 1784559591, Message 1902018696 from 438669788@[群:685960161]: '[CQ:image,summary=&#91;动画表情&#93;,file=31D15C45E386A5411B554F84B747E0C7.png,sub_type=1,url=https://multimedia.nt.qq.com.cn/download?appid=1407&amp;fileid=EhSbGV2Ytk0g0UHI1dGHSbo4SQXtORj-lgcg_woo3pjljOOYjgMyBHByb2RQgL2jAVoQkfDaXzp22wKtrYL1KgdHrHoCyrI&amp;rkey=CAESMC0ioki6BRhbvAhpO2Y97GbwraqrQnol9aTBg1QgKJEm696IAciEXUEEQnVTA7xkEg,file_size=117630]'
+[2025-06-30 16:55:49,936 nonebot] INFO: Self: 1784559591, Message 1274795292 from 770168382@[群:952870960]: '110也补吗'
+[2025-06-30 16:55:51,960 nonebot] INFO: Self: 1784559591, Message 613120015 from 770168382@[群:952870960]: '没必要'
+"
+可以看出,有nonebot的才是真正的群聊信息;
