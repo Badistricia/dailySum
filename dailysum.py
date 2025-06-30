@@ -233,23 +233,15 @@ def generate_html_content(summary, group_name, date_str):
     log_info(f"开始生成HTML内容，群: {group_name}, 日期: {date_str}")
     log_debug(f"AI摘要长度: {len(summary)}")
     
-    # 从AI输出中提取内容
-    # 这里假设AI已经生成了符合要求的HTML片段
-    if "<div class=\"bento-grid\">" in summary and "</div>" in summary:
-        # 直接提取AI生成的HTML内容
-        start_idx = summary.find("<div class=\"bento-grid\">")
-        end_idx = summary.rfind("</div>") + 6
-        content = summary[start_idx:end_idx]
-        log_info("使用AI直接生成的HTML内容")
-    else:
-        # 将AI输出转换为简单的HTML格式
-        content = f"""
-        <div class="bento-item large">
-            <h2>AI生成内容</h2>
-            <p>{summary.replace('\n', '<br>')}</p>
-        </div>
-        """
-        log_info("将AI文本转换为简单HTML格式")
+    # 将AI输出转换为简单的HTML格式
+    summary_html = summary.replace('\n', '<br>')
+    content = f"""
+    <div class="bento-item large">
+        <h2>AI生成内容</h2>
+        <p>{summary_html}</p>
+    </div>
+    """
+    log_info("将AI文本转换为简单HTML格式")
     
     # 生成完整HTML
     html = HTML_TEMPLATE.format(
@@ -423,9 +415,11 @@ async def execute_daily_summary(bot, target_groups=None, day_offset=0):
         if os.path.exists(image_path):
             try:
                 log_info(f"开始向群 {group_id} 发送日报图片...")
+                # 构建图片消息
+                img_msg = f"[CQ:image,file=file://{image_path}]"
                 await bot.send_group_msg(
                     group_id=int(group_id),
-                    message=f"[CQ:image,file=file:///{image_path}]"
+                    message=img_msg
                 )
                 log_info(f"成功发送群 {group_id} 的日报")
             except Exception as e:
