@@ -35,14 +35,14 @@ os.makedirs(LOG_DIR, exist_ok=True)
 LOG_PATTERN = r'\[(.*?) nonebot\] INFO: Self: (.*?), Message (.*?) from (.*?)@\[群:(.*?)\]: \'(.*)\''
 
 # HTML转图片工具初始化
-try:
-    log_info("初始化 HTML2Image...")
-    hti = html2image.Html2Image()
-    log_info("HTML2Image 初始化成功")
-except Exception as e:
-    log_critical(f"HTML2Image 初始化失败: {str(e)}")
-    log_critical(traceback.format_exc())
-    hti = None
+# try:
+#     log_info("初始化 HTML2Image...")
+#     hti = html2image.Html2Image()
+#     log_info("HTML2Image 初始化成功")
+# except Exception as e:
+#     log_critical(f"HTML2Image 初始化失败: {str(e)}")
+#     log_critical(traceback.format_exc())
+#     hti = None
 
 # 深度学习客户端
 class DeepSeekClient:
@@ -228,92 +228,6 @@ async def split_log_files(day_offset=0):
     
     return group_messages, date_str
 
-# 生成HTML内容
-@logged
-def generate_html_content(summary, group_name, date_str):
-    """
-    生成HTML内容
-    :param summary: AI生成的摘要内容
-    :param group_name: 群名称
-    :param date_str: 日期字符串
-    :return: HTML内容
-    """
-    log_info(f"开始生成HTML内容，群: {group_name}, 日期: {date_str}")
-    log_debug(f"AI摘要长度: {len(summary)}")
-    
-    # 从AI输出中提取内容
-    # 这里假设AI已经生成了符合要求的HTML片段
-    if "<div class=\"bento-grid\">" in summary and "</div>" in summary:
-        # 直接提取AI生成的HTML内容
-        start_idx = summary.find("<div class=\"bento-grid\">")
-        end_idx = summary.rfind("</div>") + 6
-        content = summary[start_idx:end_idx]
-        log_info("使用AI直接生成的HTML内容")
-    else:
-        # 将AI输出转换为简单的HTML格式
-        summary_html = summary.replace('\n', '<br>')
-        content = f"""
-        <div class="bento-item large">
-            <h2>AI生成内容</h2>
-            <p>{summary_html}</p>
-        </div>
-        """
-        log_info("将AI文本转换为简单HTML格式")
-    
-    # 生成完整HTML
-    html = HTML_TEMPLATE.format(
-        group_name=group_name,
-        date=date_str,
-        content=content
-    )
-    
-    log_info(f"HTML内容生成完成，长度: {len(html)}")
-    log_debug(f"HTML前200字符: {html[:200]}...")
-    
-    return html
-
-# 生成图片
-@logged
-async def generate_image(html_content, output_path):
-    """
-    将HTML内容转换为图片
-    :param html_content: HTML内容
-    :param output_path: 输出图片路径
-    :return: 图片路径
-    """
-    log_info(f"开始生成图片，输出路径: {output_path}")
-    
-    if hti is None:
-        log_error_msg("HTML2Image 未初始化，无法生成图片")
-        return None
-    
-    try:
-        # 保存HTML到临时文件
-        html_path = os.path.join(DATA_DIR, "temp.html")
-        with open(html_path, "w", encoding="utf-8") as f:
-            f.write(html_content)
-        log_info(f"HTML内容已保存到临时文件: {html_path}")
-        
-        # 将HTML转换为图片
-        log_info("开始将HTML转换为图片...")
-        hti.screenshot(
-            html_str=html_content,
-            save_as=output_path,
-            size=(800, None)  # 宽度固定，高度自适应
-        )
-        log_info(f"图片生成成功: {output_path}")
-        
-        # 删除临时HTML文件
-        if os.path.exists(html_path):
-            os.remove(html_path)
-            log_info(f"临时HTML文件已删除: {html_path}")
-        
-        return output_path
-    except Exception as e:
-        log_error_msg(f"生成图片出错: {str(e)}")
-        log_error_msg(traceback.format_exc())
-        return None
-
 # 生成群聊摘要
 @logged
 async def generate_summary(group_id, date_str):
@@ -419,31 +333,18 @@ async def execute_daily_summary(bot, target_groups=None, day_offset=0):
             log_warning(f"群 {group_id} 的摘要生成失败，跳过")
             continue
         
-        # 生成HTML内容
-        log_info(f"为群 {group_id} 生成HTML内容...")
-        html_content = generate_html_content(summary, f"群{group_id}", date_str)
-        
-        # 生成图片
-        image_path = os.path.join(DATA_DIR, f"{group_id}_{date_str}.png")
-        log_info(f"为群 {group_id} 生成图片...")
-        await generate_image(html_content, image_path)
-        
-        # 发送到群
-        if os.path.exists(image_path):
-            try:
-                log_info(f"开始向群 {group_id} 发送日报图片...")
-                # 构建图片消息
-                img_msg = f"[CQ:image,file=file://{image_path}]"
-                await bot.send_group_msg(
-                    group_id=int(group_id),
-                    message=img_msg
-                )
-                log_info(f"成功发送群 {group_id} 的日报")
-            except Exception as e:
-                log_error_msg(f"发送群 {group_id} 日报出错: {str(e)}")
-                log_error_msg(traceback.format_exc())
-        else:
-            log_error_msg(f"群 {group_id} 的日报图片不存在，无法发送")
+        # 直接发送AI生成的文本摘要
+        try:
+            log_info(f"开始向群 {group_id} 发送文本摘要...")
+            message_to_send = f"【{date_str} 群聊日报】\n\n{summary}"
+            await bot.send_group_msg(
+                group_id=int(group_id),
+                message=message_to_send
+            )
+            log_info(f"成功发送群 {group_id} 的文本日报")
+        except Exception as e:
+            log_error_msg(f"发送群 {group_id} 文本日报出错: {str(e)}")
+            log_error_msg(traceback.format_exc())
 
 # 手动触发总结
 @logged
