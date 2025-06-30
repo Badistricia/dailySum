@@ -4,7 +4,7 @@ from .logger_helper import log_info, log_warning, log_error_msg
 from .dailysum import start_scheduler, manual_summary
 
 sv = Service(
-    name='群聊日报',
+    name='dailySum',
     bundle='日常',
     help_='''
     [日报] 手动触发当天群聊总结
