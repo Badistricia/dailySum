@@ -6,7 +6,7 @@ try:
     LOG_PATH = os.path.abspath(_info_log_file)
 except ImportError:
     # 兜底方案，如果获取失败则需要手动指定
-    LOG_PATH = '' # 如果自动获取失败，请在这里手动填写 run.py 所在目录下的 log/info.log 的绝对路径
+    LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), 'run.log')  # 指向项目根目录的run.log文件
 
 # 基本配置
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
@@ -17,9 +17,9 @@ SUMMARY_HOUR_AFTERNOON = 18  # 下午6点进行总结
 SUMMARY_HOUR_NIGHT = 0  # 晚上12点进行总结
 
 # AI配置
-AI_API_KEY = ""  # DeepSeek API密钥
-AI_MODEL = "deepseek-v3"  # AI模型名称
-AI_TEMPERATURE = 0.7  # AI生成温度
+AI_API_KEY = "sk-476330950dd24ff6869b6a301930f275"  # DeepSeek API密钥
+AI_MODEL = "deepseek-chat"  # AI模型名称
+AI_TEMPERATURE = 1.0  # AI生成温度
 
 # 提示词配置
 PROMPT_TEMPLATE = """请根据【{group_name}】今天的聊天记录，整理一份QQ群日报，要求：  
