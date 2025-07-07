@@ -42,8 +42,30 @@ LOG_PATTERN = r'\[(.*?) nonebot\] INFO: Self: (.*?), Message (.*?) from (.*?)@\[
 # HTML转图片工具初始化
 try:
     log_info("初始化 HTML2Image...")
-    hti = html2image.Html2Image()
-    log_info("HTML2Image 初始化成功")
+    # 检查常见的Chrome/Chromium路径
+    chrome_paths = [
+        '/usr/bin/chromium-browser',  # 标准路径
+        '/snap/bin/chromium',         # snap安装路径
+        '/usr/bin/chromium',          # 一些系统上的路径
+        '/usr/bin/google-chrome',     # Google Chrome路径
+        '/usr/bin/google-chrome-stable'
+    ]
+    
+    # 检查哪个路径存在
+    chrome_path = None
+    for path in chrome_paths:
+        if os.path.exists(path):
+            chrome_path = path
+            log_info(f"找到Chrome/Chromium路径: {chrome_path}")
+            break
+    
+    if chrome_path:
+        hti = html2image.Html2Image(chrome_path=chrome_path)
+        log_info(f"HTML2Image使用浏览器路径 {chrome_path} 初始化成功")
+    else:
+        # 尝试默认初始化
+        hti = html2image.Html2Image()
+        log_info("HTML2Image使用默认设置初始化成功")
 except Exception as e:
     log_critical(f"HTML2Image 初始化失败: {str(e)}")
     log_critical(traceback.format_exc())
