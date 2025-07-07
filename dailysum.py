@@ -635,6 +635,8 @@ scheduler_running = False
 @sv.on_prefix(['日报'])
 async def view_daily_report(bot, ev):
     """查看指定日期的日报"""
+    global scheduler_running  # 将global声明移到函数开头
+    
     if not priv.check_priv(ev, priv.ADMIN):
         await bot.send(ev, '抱歉，只有管理员才能查看日报')
         return
@@ -645,7 +647,6 @@ async def view_daily_report(bot, ev):
     # 解析命令
     if msg.startswith(('启用', '开启')):
         # 启用日报功能
-        global scheduler_running
         if scheduler_running:
             await bot.send(ev, '日报定时功能已经在运行中')
             return
@@ -660,7 +661,6 @@ async def view_daily_report(bot, ev):
             
     elif msg.startswith(('禁用', '关闭')):
         # 禁用日报功能
-        global scheduler_running
         if not scheduler_running:
             await bot.send(ev, '日报定时功能已经是关闭状态')
             return
