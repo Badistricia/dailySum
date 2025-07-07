@@ -17,7 +17,7 @@ if sys.version_info < (3, 9):
     list = typing.List
     dict = typing.Dict
 
-import html2image # 恢复导入
+# import html2image # 暂时禁用图片功能
 from apscheduler.triggers.cron import CronTrigger
 from nonebot import scheduler
 from nonebot.message import MessageSegment
@@ -39,37 +39,34 @@ os.makedirs(LOG_DIR, exist_ok=True)
 # 适配run.log的新正则表达式，精确匹配提供的日志格式
 LOG_PATTERN = r'\[(.*?) nonebot\] INFO: Self: (.*?), Message (.*?) from (.*?)@\[群:(.*?)\]: \'(.*?)\'$'
 
-# HTML转图片工具初始化
-try:
-    log_info("初始化 HTML2Image...")
-    # 检查常见的Chrome/Chromium路径
-    chrome_paths = [
-        '/usr/bin/chromium-browser',  # 标准路径
-        '/snap/bin/chromium',         # snap安装路径
-        '/usr/bin/chromium',          # 一些系统上的路径
-        '/usr/bin/google-chrome',     # Google Chrome路径
-        '/usr/bin/google-chrome-stable'
-    ]
-    
-    # 检查哪个路径存在
-    chrome_path = None
-    for path in chrome_paths:
-        if os.path.exists(path):
-            chrome_path = path
-            log_info(f"找到Chrome/Chromium路径: {chrome_path}")
-            break
-    
-    if chrome_path:
-        hti = html2image.Html2Image(chrome_path=chrome_path)
-        log_info(f"HTML2Image使用浏览器路径 {chrome_path} 初始化成功")
-    else:
-        # 尝试默认初始化
-        hti = html2image.Html2Image()
-        log_info("HTML2Image使用默认设置初始化成功")
-except Exception as e:
-    log_critical(f"HTML2Image 初始化失败: {str(e)}")
-    log_critical(traceback.format_exc())
-    hti = None
+# HTML转图片工具初始化 - 暂时注释掉
+# try:
+#     log_info("初始化 HTML2Image...")
+#     chrome_paths = [
+#         '/usr/bin/chromium-browser',  # 标准路径
+#         '/snap/bin/chromium',         # snap安装路径
+#         '/usr/bin/chromium',          # 一些系统上的路径
+#         '/usr/bin/google-chrome',     # Google Chrome路径
+#         '/usr/bin/google-chrome-stable'
+#     ]
+#     
+#     chrome_path = None
+#     for path in chrome_paths:
+#         if os.path.exists(path):
+#             chrome_path = path
+#             log_info(f"找到Chrome/Chromium路径: {chrome_path}")
+#             break
+#     
+#     if chrome_path:
+#         hti = html2image.Html2Image(chrome_path=chrome_path)
+#         log_info(f"HTML2Image使用浏览器路径 {chrome_path} 初始化成功")
+#     else:
+#         hti = html2image.Html2Image()
+#         log_info("HTML2Image使用默认设置初始化成功")
+# except Exception as e:
+#     log_critical(f"HTML2Image 初始化失败: {str(e)}")
+#     log_critical(traceback.format_exc())
+#     hti = None
 
 # 创建HTML文本样式
 HTML_TEMPLATE = """
@@ -445,9 +442,9 @@ async def generate_image_summary(title, content, date_str):
     """
     log_info(f"开始生成图片摘要，日期: {date_str}")
     
-    if not hti:
-        log_error_msg("HTML2Image未初始化，无法生成图片")
-        return None
+    # if not hti:
+    #     log_error_msg("HTML2Image未初始化，无法生成图片")
+    #     return None
     
     try:
         # 生成HTML内容
@@ -469,11 +466,11 @@ async def generate_image_summary(title, content, date_str):
         
         # 生成图片
         log_info("开始生成图片...")
-        hti.screenshot(
-            html_file=temp_html_path,
-            save_as=temp_png_path,
-            size=(800, None)  # 宽度固定，高度自适应
-        )
+        # hti.screenshot(
+        #     html_file=temp_html_path,
+        #     save_as=temp_png_path,
+        #     size=(800, None)  # 宽度固定，高度自适应
+        # )
         log_info(f"图片已生成: {temp_png_path}")
         
         # 读取图片并转换为base64
@@ -484,7 +481,7 @@ async def generate_image_summary(title, content, date_str):
         
         # 清理临时文件
         try:
-            os.remove(temp_html_path)
+            # os.remove(temp_html_path)
             os.remove(temp_png_path)
             log_info("临时文件已清理")
         except Exception as e:
@@ -498,18 +495,28 @@ async def generate_image_summary(title, content, date_str):
 
 # 执行日报生成
 @logged
-async def execute_daily_summary(bot, target_groups=None, day_offset=0):
+async def execute_daily_summary(bot, target_groups=None, day_offset=0, start_hour=4):
     """
     执行日报生成
     :param bot: 机器人实例
     :param target_groups: 目标群列表，为None时处理所有群
     :param day_offset: 日期偏移，0表示今天，1表示昨天，以此类推
+    :param start_hour: 日报统计的起始小时，默认为4点
     """
-    # 计算目标日期
-    target_date = datetime.now() - timedelta(days=day_offset)
-    date_str = target_date.strftime('%Y-%m-%d')
+    # 计算目标日期范围
+    now = datetime.now()
+    target_date = now - timedelta(days=day_offset)
     
-    log_info(f"开始执行日报生成，日期: {date_str}")
+    # 设置时间范围为昨天4点到今天4点
+    if day_offset == 0:  # 如果是今天，则范围是昨天4点到今天4点
+        start_time = datetime(target_date.year, target_date.month, target_date.day, start_hour, 0, 0) - timedelta(days=1)
+        end_time = datetime(target_date.year, target_date.month, target_date.day, start_hour, 0, 0)
+    else:  # 如果是查询历史，则范围是目标日期4点到次日4点
+        start_time = datetime(target_date.year, target_date.month, target_date.day, start_hour, 0, 0)
+        end_time = start_time + timedelta(days=1)
+    
+    date_str = start_time.strftime('%Y-%m-%d')
+    log_info(f"开始执行日报生成，时间范围: {start_time} - {end_time}")
     log_info(f"目标群: {target_groups if target_groups else '所有群'}")
     
     # 分割日志文件
@@ -542,56 +549,16 @@ async def execute_daily_summary(bot, target_groups=None, day_offset=0):
         
         # 发送日报
         try:
-            # 标题
-            title = f"【{date_str} 群聊日报】"
-            
-            # 尝试生成图片
-            log_info("尝试以图片形式发送日报...")
-            image_data = await generate_image_summary(title, summary, date_str)
-            
-            if image_data:
-                # 生成图片成功，使用图片发送
-                log_info(f"使用图片形式向群 {group_id} 发送日报...")
-                
-                # 保存图片到临时文件
-                temp_img_path = os.path.join(DATA_DIR, f"temp_summary_{group_id}_{date_str}.png")
-                with open(temp_img_path, 'wb') as f:
-                    f.write(image_data)
-                
-                # 发送图片
-                await bot.send_group_msg(
-                    group_id=int(group_id),
-                    message=MessageSegment.image(f'file:///{temp_img_path}')
-                )
-                log_info(f"成功向群 {group_id} 发送图片日报")
-                
-                # 清理临时文件
-                try:
-                    os.remove(temp_img_path)
-                except Exception as e:
-                    log_warning(f"清理临时图片文件失败: {str(e)}")
-            else:
-                # 图片生成失败，使用文本发送
-                log_info(f"图片生成失败，使用文本形式向群 {group_id} 发送日报...")
-                message_to_send = f"{title}\n\n{summary}"
-                await bot.send_group_msg(
-                    group_id=int(group_id),
-                    message=message_to_send
-                )
-                log_info(f"成功向群 {group_id} 发送文本日报")
+            log_info(f"开始向群 {group_id} 发送文本摘要...")
+            message_to_send = f"【{date_str} 群聊日报】\n统计范围：{start_time.strftime('%m-%d %H:%M')} - {end_time.strftime('%m-%d %H:%M')}\n\n{summary}"
+            await bot.send_group_msg(
+                group_id=int(group_id),
+                message=message_to_send
+            )
+            log_info(f"成功向群 {group_id} 发送文本日报")
         except Exception as e:
             log_error_msg(f"向群 {group_id} 发送日报出错: {str(e)}")
             log_error_msg(traceback.format_exc())
-            # 尝试使用纯文本发送
-            try:
-                message_to_send = f"【{date_str} 群聊日报】\n\n{summary}"
-                await bot.send_group_msg(
-                    group_id=int(group_id),
-                    message=message_to_send
-                )
-                log_info(f"成功使用纯文本向群 {group_id} 发送日报")
-            except Exception as e2:
-                log_error_msg(f"向群 {group_id} 发送纯文本日报也失败: {str(e2)}")
 
 # 手动触发总结
 @logged
@@ -641,48 +608,104 @@ async def manual_summary(bot, ev, day_offset=0, target_group=None):
     
     # 发送到当前群（触发命令的群）
     try:
-        # 标题
-        title = f"【{date_str} {'群 '+target_group if target_group != current_group_id else '本群'}聊天日报】"
-        
-        # 尝试生成图片
-        log_info("尝试以图片形式发送日报...")
-        image_data = await generate_image_summary(title, summary, date_str)
-        
-        if image_data:
-            # 生成图片成功，使用图片发送
-            log_info("使用图片形式发送日报...")
-            
-            # 保存图片到临时文件
-            temp_img_path = os.path.join(DATA_DIR, f"temp_summary_{date_str}.png")
-            with open(temp_img_path, 'wb') as f:
-                f.write(image_data)
-            
-            # 发送图片
-            await bot.send(ev, MessageSegment.image(f'file:///{temp_img_path}'))
-            log_info(f"成功发送群 {target_group} 的图片日报到群 {current_group_id}")
-            
-            # 清理临时文件
-            try:
-                os.remove(temp_img_path)
-            except Exception as e:
-                log_warning(f"清理临时图片文件失败: {str(e)}")
-        else:
-            # 图片生成失败，使用文本发送
-            log_info("图片生成失败，使用文本形式发送日报...")
-            message_to_send = f"{title}\n\n{summary}"
-            await bot.send(ev, message_to_send)
-            log_info(f"成功发送群 {target_group} 的文本日报到群 {current_group_id}")
+        log_info(f"开始向群 {current_group_id} 发送文本摘要...")
+        message_to_send = f"【{date_str} {'群 '+target_group if target_group != current_group_id else '本群'}聊天日报】\n\n{summary}"
+        await bot.send_group_msg(
+            group_id=int(current_group_id),
+            message=message_to_send
+        )
+        log_info(f"成功发送群 {target_group} 的文本日报到群 {current_group_id}")
     except Exception as e:
         log_error_msg(f"发送群 {target_group} 日报到群 {current_group_id} 出错: {str(e)}")
         log_error_msg(traceback.format_exc())
-        # 尝试使用纯文本发送
-        try:
-            message_to_send = f"【{date_str} {'群 '+target_group if target_group != current_group_id else '本群'}聊天日报】\n\n{summary}"
-            await bot.send(ev, message_to_send)
-            log_info(f"成功使用纯文本发送群 {target_group} 的日报到群 {current_group_id}")
-        except Exception as e2:
-            log_error_msg(f"纯文本发送也失败: {str(e2)}")
-            await bot.send(ev, f"发送日报失败，请查看日志")
+
+# 定时任务状态
+scheduler_running = False
+
+@sv.on_prefix(['启用日报', '开启日报'])
+async def enable_daily_report(bot, ev):
+    """启用日报定时功能"""
+    global scheduler_running
+    
+    if not priv.check_priv(ev, priv.ADMIN):
+        await bot.send(ev, '抱歉，只有管理员才能启用日报功能')
+        return
+        
+    if scheduler_running:
+        await bot.send(ev, '日报定时功能已经在运行中')
+        return
+        
+    try:
+        start_scheduler(sv)
+        scheduler_running = True
+        await bot.send(ev, '日报定时功能已启用，将在每天早上8:30发送昨天4点到今天4点的日报')
+    except Exception as e:
+        log_error_msg(f"启用日报定时功能失败: {str(e)}")
+        await bot.send(ev, '启用日报定时功能失败，请查看日志')
+
+@sv.on_prefix(['禁用日报', '关闭日报'])
+async def disable_daily_report(bot, ev):
+    """禁用日报定时功能"""
+    global scheduler_running
+    
+    if not priv.check_priv(ev, priv.ADMIN):
+        await bot.send(ev, '抱歉，只有管理员才能禁用日报功能')
+        return
+        
+    if not scheduler_running:
+        await bot.send(ev, '日报定时功能已经是关闭状态')
+        return
+        
+    try:
+        # 移除所有日报相关的定时任务
+        scheduler.remove_job('dailysum_morning')
+        scheduler.remove_job('dailysum_afternoon')
+        scheduler.remove_job('dailysum_night')
+        scheduler_running = False
+        await bot.send(ev, '日报定时功能已禁用')
+    except Exception as e:
+        log_error_msg(f"禁用日报定时功能失败: {str(e)}")
+        await bot.send(ev, '禁用日报定时功能失败，请查看日志')
+
+@sv.on_prefix(['查看日报'])
+async def view_daily_report(bot, ev):
+    """查看指定日期的日报"""
+    if not priv.check_priv(ev, priv.ADMIN):
+        await bot.send(ev, '抱歉，只有管理员才能查看日报')
+        return
+        
+    # 获取命令参数
+    msg = ev.message.extract_plain_text().strip()
+    
+    # 解析参数
+    try:
+        if not msg:
+            # 没有参数，默认查看昨天的日报
+            day_offset = 1
+            target_group = None
+        else:
+            parts = msg.split()
+            if len(parts) == 1:
+                # 只有一个参数，可能是天数或群号
+                if parts[0].isdigit() and len(parts[0]) > 4:
+                    # 长数字，认为是群号
+                    day_offset = 1
+                    target_group = parts[0]
+                else:
+                    # 短数字或其他，认为是天数
+                    day_offset = int(parts[0])
+                    target_group = None
+            else:
+                # 两个参数，第一个是天数，第二个是群号
+                day_offset = int(parts[0])
+                target_group = parts[1]
+        
+        await manual_summary(bot, ev, day_offset, target_group)
+    except ValueError:
+        await bot.send(ev, '参数格式错误。使用方法：\n查看日报 [天数] [群号]\n例如：\n查看日报 - 查看昨天的本群日报\n查看日报 1 - 查看昨天的本群日报\n查看日报 2 123456 - 查看前天群123456的日报')
+    except Exception as e:
+        log_error_msg(f"查看日报失败: {str(e)}")
+        await bot.send(ev, '查看日报失败，请查看日志')
 
 # 启动定时任务
 def start_scheduler(sv: Service):
@@ -697,10 +720,31 @@ def start_scheduler(sv: Service):
     log_info("开始启动群聊日报定时任务")
     
     bot = get_bot()
-    scheduler.add_job(execute_daily_summary, CronTrigger(hour=SUMMARY_HOUR_AFTERNOON, minute=0), args=(bot,), id='dailysum_afternoon')
+    
+    # 每天早上8:30发送昨天4点到今天4点的日报
+    scheduler.add_job(
+        execute_daily_summary,
+        CronTrigger(hour=8, minute=30),
+        args=(bot, None, 0, 4),  # bot, target_groups=None, day_offset=0, start_hour=4
+        id='dailysum_morning'
+    )
+    log_info("已添加早上 8:30 的定时任务")
+    
+    # 保留原有的下午和晚上的定时任务
+    scheduler.add_job(
+        execute_daily_summary,
+        CronTrigger(hour=SUMMARY_HOUR_AFTERNOON, minute=0),
+        args=(bot,),
+        id='dailysum_afternoon'
+    )
     log_info(f"已添加下午 {SUMMARY_HOUR_AFTERNOON}:00 的定时任务")
     
-    scheduler.add_job(execute_daily_summary, CronTrigger(hour=SUMMARY_HOUR_NIGHT, minute=0), args=(bot,), id='dailysum_night')
+    scheduler.add_job(
+        execute_daily_summary,
+        CronTrigger(hour=SUMMARY_HOUR_NIGHT, minute=0),
+        args=(bot,),
+        id='dailysum_night'
+    )
     log_info(f"已添加晚上 {SUMMARY_HOUR_NIGHT}:00 的定时任务")
     
     log_info('群聊日报定时任务启动完成') 
