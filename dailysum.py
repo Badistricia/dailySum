@@ -20,8 +20,9 @@ if sys.version_info < (3, 9):
 import html2image # 恢复导入
 from apscheduler.triggers.cron import CronTrigger
 from nonebot import scheduler
+from nonebot.message import MessageSegment
 
-from hoshino import Service, priv, logger, get_bot, MessageSegment
+from hoshino import Service, priv, logger, get_bot
 from .config import *
 from .logger_helper import log_debug, log_info, log_warning, log_error_msg, log_critical, logged
 
