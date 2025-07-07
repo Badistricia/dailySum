@@ -26,6 +26,15 @@ from hoshino import Service, priv, logger, get_bot
 from .config import *
 from .logger_helper import log_debug, log_info, log_warning, log_error_msg, log_critical, logged
 
+# 创建服务实例
+sv = Service(
+    name='群聊日报',
+    use_priv=priv.ADMIN,  # 使用权限：管理员
+    manage_priv=priv.ADMIN,  # 管理权限：管理员
+    visible=True,  # 可见性：可见
+    enable_on_default=False,  # 默认关闭
+)
+
 # 确保data目录存在
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -633,35 +642,70 @@ async def view_daily_report(bot, ev):
     # 获取命令参数
     msg = ev.message.extract_plain_text().strip()
     
-    # 解析参数
-    try:
-        if not msg:
-            # 没有参数，默认查看昨天的日报
-            day_offset = 1
-            target_group = None
-        else:
-            parts = msg.split()
-            if len(parts) == 1:
-                # 只有一个参数，可能是天数或群号
-                if parts[0].isdigit() and len(parts[0]) > 4:
-                    # 长数字，认为是群号
-                    day_offset = 1
-                    target_group = parts[0]
-                else:
-                    # 短数字或其他，认为是天数
-                    day_offset = int(parts[0])
-                    target_group = None
+    # 解析命令
+    if msg.startswith(('启用', '开启')):
+        # 启用日报功能
+        global scheduler_running
+        if scheduler_running:
+            await bot.send(ev, '日报定时功能已经在运行中')
+            return
+            
+        try:
+            start_scheduler(sv)
+            scheduler_running = True
+            await bot.send(ev, '日报定时功能已启用，将在每天早上8:30发送昨天4点到今天4点的日报')
+        except Exception as e:
+            log_error_msg(f"启用日报定时功能失败: {str(e)}")
+            await bot.send(ev, '启用日报定时功能失败，请查看日志')
+            
+    elif msg.startswith(('禁用', '关闭')):
+        # 禁用日报功能
+        global scheduler_running
+        if not scheduler_running:
+            await bot.send(ev, '日报定时功能已经是关闭状态')
+            return
+            
+        try:
+            # 移除所有日报相关的定时任务
+            scheduler.remove_job('dailysum_morning')
+            scheduler.remove_job('dailysum_afternoon')
+            scheduler.remove_job('dailysum_night')
+            scheduler_running = False
+            await bot.send(ev, '日报定时功能已禁用')
+        except Exception as e:
+            log_error_msg(f"禁用日报定时功能失败: {str(e)}")
+            await bot.send(ev, '禁用日报定时功能失败，请查看日志')
+            
+    else:
+        # 查看日报
+        try:
+            if not msg:
+                # 没有参数，默认查看昨天的日报
+                day_offset = 1
+                target_group = None
             else:
-                # 两个参数，第一个是天数，第二个是群号
-                day_offset = int(parts[0])
-                target_group = parts[1]
-        
-        await manual_summary(bot, ev, day_offset, target_group)
-    except ValueError:
-        await bot.send(ev, '参数格式错误。使用方法：\n查看日报 [天数] [群号]\n例如：\n查看日报 - 查看昨天的本群日报\n查看日报 1 - 查看昨天的本群日报\n查看日报 2 123456 - 查看前天群123456的日报')
-    except Exception as e:
-        log_error_msg(f"查看日报失败: {str(e)}")
-        await bot.send(ev, '查看日报失败，请查看日志')
+                parts = msg.split()
+                if len(parts) == 1:
+                    # 只有一个参数，可能是天数或群号
+                    if parts[0].isdigit() and len(parts[0]) > 4:
+                        # 长数字，认为是群号
+                        day_offset = 1
+                        target_group = parts[0]
+                    else:
+                        # 短数字或其他，认为是天数
+                        day_offset = int(parts[0])
+                        target_group = None
+                else:
+                    # 两个参数，第一个是天数，第二个是群号
+                    day_offset = int(parts[0])
+                    target_group = parts[1]
+            
+            await manual_summary(bot, ev, day_offset, target_group)
+        except ValueError:
+            await bot.send(ev, '参数格式错误。使用方法：\n日报 [天数] [群号]\n例如：\n日报 - 查看昨天的本群日报\n日报 1 - 查看昨天的本群日报\n日报 2 123456 - 查看前天群123456的日报\n日报 启用 - 启用日报定时功能\n日报 禁用 - 禁用日报定时功能')
+        except Exception as e:
+            log_error_msg(f"查看日报失败: {str(e)}")
+            await bot.send(ev, '查看日报失败，请查看日志')
 
 # 启动定时任务
 def start_scheduler(sv: Service):
@@ -686,21 +730,21 @@ def start_scheduler(sv: Service):
     )
     log_info("已添加早上 8:30 的定时任务")
     
-    # 保留原有的下午和晚上的定时任务
-    scheduler.add_job(
-        execute_daily_summary,
-        CronTrigger(hour=SUMMARY_HOUR_AFTERNOON, minute=0),
-        args=(bot,),
-        id='dailysum_afternoon'
-    )
-    log_info(f"已添加下午 {SUMMARY_HOUR_AFTERNOON}:00 的定时任务")
+    # # 保留原有的下午和晚上的定时任务
+    # scheduler.add_job(
+    #     execute_daily_summary,
+    #     CronTrigger(hour=SUMMARY_HOUR_AFTERNOON, minute=0),
+    #     args=(bot,),
+    #     id='dailysum_afternoon'
+    # )
+    # log_info(f"已添加下午 {SUMMARY_HOUR_AFTERNOON}:00 的定时任务")
     
-    scheduler.add_job(
-        execute_daily_summary,
-        CronTrigger(hour=SUMMARY_HOUR_NIGHT, minute=0),
-        args=(bot,),
-        id='dailysum_night'
-    )
-    log_info(f"已添加晚上 {SUMMARY_HOUR_NIGHT}:00 的定时任务")
+    # scheduler.add_job(
+    #     execute_daily_summary,
+    #     CronTrigger(hour=SUMMARY_HOUR_NIGHT, minute=0),
+    #     args=(bot,),
+    #     id='dailysum_night'
+    # )
+    # log_info(f"已添加晚上 {SUMMARY_HOUR_NIGHT}:00 的定时任务")
     
     log_info('群聊日报定时任务启动完成') 
