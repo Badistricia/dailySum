@@ -416,26 +416,62 @@ async def execute_daily_summary(bot, target_groups=None, day_offset=0):
 
 # 手动触发总结
 @logged
-async def manual_summary(bot, ev, day_offset=0):
+async def manual_summary(bot, ev, day_offset=0, target_group=None):
     """
     手动触发总结
     :param bot: 机器人实例
     :param ev: 事件对象
     :param day_offset: 日期偏移，0表示今天，1表示昨天，以此类推
+    :param target_group: 目标群号，为None时使用当前群
     """
-    group_id = str(ev['group_id'])
+    current_group_id = str(ev['group_id'])
     user_id = str(ev['user_id'])
     
-    log_info(f"用户 {user_id} 在群 {group_id} 手动触发日报生成，日期偏移: {day_offset}")
+    # 如果没有指定目标群，则使用当前群
+    if target_group is None:
+        target_group = current_group_id
+    
+    log_info(f"用户 {user_id} 在群 {current_group_id} 手动触发日报生成，目标群: {target_group}，日期偏移: {day_offset}")
     
     # 发送处理中提示
-    await bot.send(ev, "正在生成群聊日报，请稍候...")
-    log_info(f"已向群 {group_id} 发送处理中提示")
+    await bot.send(ev, f"正在生成{'指定群 '+target_group if target_group != current_group_id else '本群'}聊天日报，请稍候...")
+    log_info(f"已向群 {current_group_id} 发送处理中提示")
     
-    # 执行日报生成
-    log_info(f"开始为群 {group_id} 执行日报生成...")
-    await execute_daily_summary(bot, [group_id], day_offset)
-    log_info(f"群 {group_id} 的日报生成完成")
+    # 计算目标日期
+    target_date = datetime.now() - timedelta(days=day_offset)
+    date_str = target_date.strftime('%Y-%m-%d')
+    
+    # 分割日志文件，只处理指定的群
+    log_info(f"分割日志文件，目标群: {target_group}")
+    group_messages, _ = await split_log_files(day_offset)
+    
+    # 检查目标群是否有消息
+    if not group_messages or target_group not in group_messages:
+        await bot.send(ev, f"未找到{'指定群 '+target_group if target_group != current_group_id else '本群'}的聊天记录")
+        log_warning(f"未找到群 {target_group} 的聊天记录")
+        return
+    
+    # 生成摘要
+    log_info(f"为群 {target_group} 生成摘要...")
+    summary = await generate_summary(target_group, date_str)
+    
+    if not summary:
+        await bot.send(ev, f"生成{'指定群 '+target_group if target_group != current_group_id else '本群'}的日报失败")
+        log_warning(f"群 {target_group} 的摘要生成失败")
+        return
+    
+    # 发送到当前群（触发命令的群）
+    try:
+        log_info(f"开始向群 {current_group_id} 发送文本摘要...")
+        message_to_send = f"【{date_str} {'群 '+target_group if target_group != current_group_id else '本群'}聊天日报】\n\n{summary}"
+        await bot.send_group_msg(
+            group_id=int(current_group_id),
+            message=message_to_send
+        )
+        log_info(f"成功发送群 {target_group} 的文本日报到群 {current_group_id}")
+    except Exception as e:
+        log_error_msg(f"发送群 {target_group} 文本日报到群 {current_group_id} 出错: {str(e)}")
+        log_error_msg(traceback.format_exc())
 
 # 启动定时任务
 def start_scheduler(sv: Service):
