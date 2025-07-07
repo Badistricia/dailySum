@@ -622,52 +622,8 @@ async def manual_summary(bot, ev, day_offset=0, target_group=None):
 # 定时任务状态
 scheduler_running = False
 
-@sv.on_prefix(['启用日报', '开启日报'])
-async def enable_daily_report(bot, ev):
-    """启用日报定时功能"""
-    global scheduler_running
-    
-    if not priv.check_priv(ev, priv.ADMIN):
-        await bot.send(ev, '抱歉，只有管理员才能启用日报功能')
-        return
-        
-    if scheduler_running:
-        await bot.send(ev, '日报定时功能已经在运行中')
-        return
-        
-    try:
-        start_scheduler(sv)
-        scheduler_running = True
-        await bot.send(ev, '日报定时功能已启用，将在每天早上8:30发送昨天4点到今天4点的日报')
-    except Exception as e:
-        log_error_msg(f"启用日报定时功能失败: {str(e)}")
-        await bot.send(ev, '启用日报定时功能失败，请查看日志')
 
-@sv.on_prefix(['禁用日报', '关闭日报'])
-async def disable_daily_report(bot, ev):
-    """禁用日报定时功能"""
-    global scheduler_running
-    
-    if not priv.check_priv(ev, priv.ADMIN):
-        await bot.send(ev, '抱歉，只有管理员才能禁用日报功能')
-        return
-        
-    if not scheduler_running:
-        await bot.send(ev, '日报定时功能已经是关闭状态')
-        return
-        
-    try:
-        # 移除所有日报相关的定时任务
-        scheduler.remove_job('dailysum_morning')
-        scheduler.remove_job('dailysum_afternoon')
-        scheduler.remove_job('dailysum_night')
-        scheduler_running = False
-        await bot.send(ev, '日报定时功能已禁用')
-    except Exception as e:
-        log_error_msg(f"禁用日报定时功能失败: {str(e)}")
-        await bot.send(ev, '禁用日报定时功能失败，请查看日志')
-
-@sv.on_prefix(['查看日报'])
+@sv.on_prefix(['日报'])
 async def view_daily_report(bot, ev):
     """查看指定日期的日报"""
     if not priv.check_priv(ev, priv.ADMIN):
