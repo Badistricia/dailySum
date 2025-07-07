@@ -17,11 +17,11 @@ if sys.version_info < (3, 9):
     list = typing.List
     dict = typing.Dict
 
-# import html2image # 已禁用
+import html2image # 恢复导入
 from apscheduler.triggers.cron import CronTrigger
 from nonebot import scheduler
 
-from hoshino import Service, priv, logger, get_bot
+from hoshino import Service, priv, logger, get_bot, MessageSegment
 from .config import *
 from .logger_helper import log_debug, log_info, log_warning, log_error_msg, log_critical, logged
 
@@ -39,14 +39,67 @@ os.makedirs(LOG_DIR, exist_ok=True)
 LOG_PATTERN = r'\[(.*?) nonebot\] INFO: Self: (.*?), Message (.*?) from (.*?)@\[群:(.*?)\]: \'(.*?)\'$'
 
 # HTML转图片工具初始化
-# try:
-#     log_info("初始化 HTML2Image...")
-#     hti = html2image.Html2Image()
-#     log_info("HTML2Image 初始化成功")
-# except Exception as e:
-#     log_critical(f"HTML2Image 初始化失败: {str(e)}")
-#     log_critical(traceback.format_exc())
-#     hti = None
+try:
+    log_info("初始化 HTML2Image...")
+    hti = html2image.Html2Image()
+    log_info("HTML2Image 初始化成功")
+except Exception as e:
+    log_critical(f"HTML2Image 初始化失败: {str(e)}")
+    log_critical(traceback.format_exc())
+    hti = None
+
+# 创建HTML文本样式
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>群聊日报</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #4a6bdf;
+            text-align: center;
+            border-bottom: 2px solid #eaeaea;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        .summary {
+            white-space: pre-wrap;
+            padding: 10px 0;
+        }
+        .footer {
+            text-align: center;
+            font-size: 0.8em;
+            margin-top: 20px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{title}</h1>
+        <div class="summary">{content}</div>
+        <div class="footer">由AI生成 · {date}</div>
+    </div>
+</body>
+</html>
+"""
 
 # 深度学习客户端
 class DeepSeekClient:
@@ -357,6 +410,69 @@ async def generate_summary(group_id, date_str):
         log_error_msg(traceback.format_exc())
         return None
 
+# 生成图片摘要
+@logged
+async def generate_image_summary(title, content, date_str):
+    """
+    将摘要转换为图片
+    :param title: 标题
+    :param content: 内容
+    :param date_str: 日期字符串
+    :return: 图片数据（base64编码）
+    """
+    log_info(f"开始生成图片摘要，日期: {date_str}")
+    
+    if not hti:
+        log_error_msg("HTML2Image未初始化，无法生成图片")
+        return None
+    
+    try:
+        # 生成HTML内容
+        html_content = HTML_TEMPLATE.format(
+            title=title,
+            content=content,
+            date=date_str
+        )
+        
+        # 生成临时文件路径
+        temp_html_path = os.path.join(DATA_DIR, f"summary_{date_str}.html")
+        temp_png_path = os.path.join(DATA_DIR, f"summary_{date_str}.png")
+        
+        # 保存HTML到临时文件
+        with open(temp_html_path, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        
+        log_info(f"HTML内容已保存到临时文件: {temp_html_path}")
+        
+        # 生成图片
+        log_info("开始生成图片...")
+        hti.screenshot(
+            html_file=temp_html_path,
+            save_as=temp_png_path,
+            size=(800, None)  # 宽度固定，高度自适应
+        )
+        log_info(f"图片已生成: {temp_png_path}")
+        
+        # 读取图片并转换为base64
+        with open(temp_png_path, 'rb') as f:
+            image_data = f.read()
+        
+        log_info(f"图片大小: {len(image_data) / 1024:.2f} KB")
+        
+        # 清理临时文件
+        try:
+            os.remove(temp_html_path)
+            os.remove(temp_png_path)
+            log_info("临时文件已清理")
+        except Exception as e:
+            log_warning(f"清理临时文件失败: {str(e)}")
+        
+        return image_data
+    except Exception as e:
+        log_error_msg(f"生成图片摘要出错: {str(e)}")
+        log_error_msg(traceback.format_exc())
+        return None
+
 # 执行日报生成
 @logged
 async def execute_daily_summary(bot, target_groups=None, day_offset=0):
@@ -401,18 +517,58 @@ async def execute_daily_summary(bot, target_groups=None, day_offset=0):
             log_warning(f"群 {group_id} 的摘要生成失败，跳过")
             continue
         
-        # 直接发送AI生成的文本摘要
+        # 发送日报
         try:
-            log_info(f"开始向群 {group_id} 发送文本摘要...")
-            message_to_send = f"【{date_str} 群聊日报】\n\n{summary}"
-            await bot.send_group_msg(
-                group_id=int(group_id),
-                message=message_to_send
-            )
-            log_info(f"成功发送群 {group_id} 的文本日报")
+            # 标题
+            title = f"【{date_str} 群聊日报】"
+            
+            # 尝试生成图片
+            log_info("尝试以图片形式发送日报...")
+            image_data = await generate_image_summary(title, summary, date_str)
+            
+            if image_data:
+                # 生成图片成功，使用图片发送
+                log_info(f"使用图片形式向群 {group_id} 发送日报...")
+                
+                # 保存图片到临时文件
+                temp_img_path = os.path.join(DATA_DIR, f"temp_summary_{group_id}_{date_str}.png")
+                with open(temp_img_path, 'wb') as f:
+                    f.write(image_data)
+                
+                # 发送图片
+                await bot.send_group_msg(
+                    group_id=int(group_id),
+                    message=MessageSegment.image(f'file:///{temp_img_path}')
+                )
+                log_info(f"成功向群 {group_id} 发送图片日报")
+                
+                # 清理临时文件
+                try:
+                    os.remove(temp_img_path)
+                except Exception as e:
+                    log_warning(f"清理临时图片文件失败: {str(e)}")
+            else:
+                # 图片生成失败，使用文本发送
+                log_info(f"图片生成失败，使用文本形式向群 {group_id} 发送日报...")
+                message_to_send = f"{title}\n\n{summary}"
+                await bot.send_group_msg(
+                    group_id=int(group_id),
+                    message=message_to_send
+                )
+                log_info(f"成功向群 {group_id} 发送文本日报")
         except Exception as e:
-            log_error_msg(f"发送群 {group_id} 文本日报出错: {str(e)}")
+            log_error_msg(f"向群 {group_id} 发送日报出错: {str(e)}")
             log_error_msg(traceback.format_exc())
+            # 尝试使用纯文本发送
+            try:
+                message_to_send = f"【{date_str} 群聊日报】\n\n{summary}"
+                await bot.send_group_msg(
+                    group_id=int(group_id),
+                    message=message_to_send
+                )
+                log_info(f"成功使用纯文本向群 {group_id} 发送日报")
+            except Exception as e2:
+                log_error_msg(f"向群 {group_id} 发送纯文本日报也失败: {str(e2)}")
 
 # 手动触发总结
 @logged
@@ -462,16 +618,48 @@ async def manual_summary(bot, ev, day_offset=0, target_group=None):
     
     # 发送到当前群（触发命令的群）
     try:
-        log_info(f"开始向群 {current_group_id} 发送文本摘要...")
-        message_to_send = f"【{date_str} {'群 '+target_group if target_group != current_group_id else '本群'}聊天日报】\n\n{summary}"
-        await bot.send_group_msg(
-            group_id=int(current_group_id),
-            message=message_to_send
-        )
-        log_info(f"成功发送群 {target_group} 的文本日报到群 {current_group_id}")
+        # 标题
+        title = f"【{date_str} {'群 '+target_group if target_group != current_group_id else '本群'}聊天日报】"
+        
+        # 尝试生成图片
+        log_info("尝试以图片形式发送日报...")
+        image_data = await generate_image_summary(title, summary, date_str)
+        
+        if image_data:
+            # 生成图片成功，使用图片发送
+            log_info("使用图片形式发送日报...")
+            
+            # 保存图片到临时文件
+            temp_img_path = os.path.join(DATA_DIR, f"temp_summary_{date_str}.png")
+            with open(temp_img_path, 'wb') as f:
+                f.write(image_data)
+            
+            # 发送图片
+            await bot.send(ev, MessageSegment.image(f'file:///{temp_img_path}'))
+            log_info(f"成功发送群 {target_group} 的图片日报到群 {current_group_id}")
+            
+            # 清理临时文件
+            try:
+                os.remove(temp_img_path)
+            except Exception as e:
+                log_warning(f"清理临时图片文件失败: {str(e)}")
+        else:
+            # 图片生成失败，使用文本发送
+            log_info("图片生成失败，使用文本形式发送日报...")
+            message_to_send = f"{title}\n\n{summary}"
+            await bot.send(ev, message_to_send)
+            log_info(f"成功发送群 {target_group} 的文本日报到群 {current_group_id}")
     except Exception as e:
-        log_error_msg(f"发送群 {target_group} 文本日报到群 {current_group_id} 出错: {str(e)}")
+        log_error_msg(f"发送群 {target_group} 日报到群 {current_group_id} 出错: {str(e)}")
         log_error_msg(traceback.format_exc())
+        # 尝试使用纯文本发送
+        try:
+            message_to_send = f"【{date_str} {'群 '+target_group if target_group != current_group_id else '本群'}聊天日报】\n\n{summary}"
+            await bot.send(ev, message_to_send)
+            log_info(f"成功使用纯文本发送群 {target_group} 的日报到群 {current_group_id}")
+        except Exception as e2:
+            log_error_msg(f"纯文本发送也失败: {str(e2)}")
+            await bot.send(ev, f"发送日报失败，请查看日志")
 
 # 启动定时任务
 def start_scheduler(sv: Service):
