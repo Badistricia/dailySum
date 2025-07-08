@@ -9,6 +9,7 @@ import httpx
 from PIL import Image
 import io
 import base64
+import shutil
 
 # 猴子补丁，用于修复html2image在Python 3.8下的兼容性问题
 import sys
@@ -315,10 +316,11 @@ async def save_group_logs(group_messages, date_str):
 
 # 分割日志文件
 @logged
-async def split_log_files(day_offset=0):
+async def split_log_files(day_offset=0, target_group=None):
     """
     分割日志文件，提取指定日期的群聊消息
     :param day_offset: 日期偏移，0表示今天，1表示昨天，以此类推
+    :param target_group: 目标群号，为None时解析所有群
     """
     # 计算日期范围
     now = datetime.now()
@@ -330,14 +332,52 @@ async def split_log_files(day_offset=0):
     log_info(f"开始分割日志文件，目标日期: {date_str}")
     log_info(f"日期偏移: {day_offset}，时间范围: {start_time} - {end_time}")
     
-    # 检查日志路径
-    if not os.path.exists(LOG_PATH):
-        log_error_msg(f"系统日志路径不存在: {LOG_PATH}")
-        return await load_test_data(date_str)
+    # 选择日志源
+    log_source = None
+    group_messages = {}
     
-    # 解析日志
-    log_info(f"开始从系统日志解析群聊消息: {LOG_PATH}")
-    group_messages = await parse_syslog(LOG_PATH, start_time, end_time)
+    # 当天日志从系统日志获取
+    if day_offset == 0:
+        if os.path.exists(LOG_PATH):
+            log_source = LOG_PATH
+            log_info(f"当天日志从系统日志获取: {log_source}")
+        else:
+            log_error_msg(f"系统日志路径不存在: {LOG_PATH}")
+    # 历史日志从备份文件获取
+    else:
+        # 尝试从备份目录查找日志
+        backup_log_path = os.path.join(LOG_DIR, f"run_log_{date_str}.log")
+        if os.path.exists(backup_log_path):
+            log_source = backup_log_path
+            log_info(f"历史日志从备份文件获取: {log_source}")
+        else:
+            log_warning(f"备份日志文件不存在: {backup_log_path}")
+            
+            # 如果没有备份日志，先检查是否已存在解析好的群聊记录
+            if target_group:
+                local_log_path = os.path.join(DATA_DIR, f"{target_group}_{date_str}.json")
+                if os.path.exists(local_log_path):
+                    log_info(f"在本地找到目标群 {target_group} 的聊天记录文件: {local_log_path}")
+                    try:
+                        with open(local_log_path, 'r', encoding='utf-8') as f:
+                            messages = json.load(f)
+                        group_messages = {target_group: messages}
+                        log_info(f"成功从本地文件加载群 {target_group} 的聊天记录，共 {len(messages)} 条消息")
+                        return group_messages, date_str
+                    except Exception as e:
+                        log_error_msg(f"加载本地聊天记录文件失败: {str(e)}")
+            
+            # 最后尝试从系统日志获取历史记录（如果系统日志未被清理）
+            if os.path.exists(LOG_PATH):
+                log_source = LOG_PATH
+                log_info(f"备份日志不存在，尝试从系统日志获取历史记录: {log_source}")
+            else:
+                log_error_msg(f"系统日志和备份日志都不存在")
+    
+    # 如果找到了日志源，则解析日志
+    if log_source:
+        log_info(f"开始从日志源解析群聊消息: {log_source}")
+        group_messages = await parse_syslog(log_source, start_time, end_time, target_group)
     
     # 检查是否有消息
     if not group_messages:
@@ -598,7 +638,7 @@ async def manual_summary(bot, ev, day_offset=0, target_group=None):
     
     # 分割日志文件，只处理指定的群
     log_info(f"分割日志文件，目标群: {target_group}")
-    group_messages, _ = await split_log_files(day_offset)
+    group_messages, _ = await split_log_files(day_offset, target_group)
     
     # 检查目标群是否有消息
     if not group_messages or target_group not in group_messages:
@@ -626,6 +666,52 @@ async def manual_summary(bot, ev, day_offset=0, target_group=None):
         log_info(f"成功发送群 {target_group} 的文本日报到群 {current_group_id}")
     except Exception as e:
         log_error_msg(f"发送群 {target_group} 日报到群 {current_group_id} 出错: {str(e)}")
+        log_error_msg(traceback.format_exc())
+
+# 备份日志文件
+@logged
+async def backup_logs():
+    """
+    备份当天的日志文件到本地logs目录
+    在每天23:59执行，确保当天的日志被保存
+    """
+    try:
+        # 确保logs目录存在
+        os.makedirs(LOG_DIR, exist_ok=True)
+        
+        # 获取当前日期
+        today = datetime.now().strftime('%Y-%m-%d')
+        log_info(f"开始备份日志文件，日期: {today}")
+        
+        # 检查日志路径
+        if not os.path.exists(LOG_PATH):
+            log_error_msg(f"系统日志路径不存在: {LOG_PATH}")
+            return
+        
+        # 目标备份文件路径
+        backup_path = os.path.join(LOG_DIR, f"run_log_{today}.log")
+        
+        # 复制日志文件
+        shutil.copy2(LOG_PATH, backup_path)
+        log_info(f"日志文件已备份到: {backup_path}")
+        
+        # 解析日志并按群保存
+        now = datetime.now()
+        start_time = datetime(now.year, now.month, now.day, 0, 0, 0)
+        end_time = datetime(now.year, now.month, now.day, 23, 59, 59)
+        
+        log_info(f"开始从备份日志解析群聊消息: {backup_path}")
+        group_messages = await parse_syslog(backup_path, start_time, end_time)
+        
+        # 保存群聊日志
+        if group_messages:
+            await save_group_logs(group_messages, today)
+            log_info(f"成功解析并保存了 {len(group_messages)} 个群的聊天记录")
+        else:
+            log_warning(f"没有从备份日志中解析到任何群聊消息")
+            
+    except Exception as e:
+        log_error_msg(f"备份日志文件出错: {str(e)}")
         log_error_msg(traceback.format_exc())
 
 # 定时任务状态
@@ -685,24 +771,39 @@ async def view_daily_report(bot, ev):
                 target_group = None
             else:
                 parts = msg.split()
-                if len(parts) == 1:
-                    # 只有一个参数，可能是天数或群号
-                    if parts[0].isdigit() and len(parts[0]) > 4:
-                        # 长数字，认为是群号
-                        day_offset = 1
-                        target_group = parts[0]
-                    else:
-                        # 短数字或其他，认为是天数
-                        day_offset = int(parts[0])
-                        target_group = None
-                else:
-                    # 两个参数，第一个是天数，第二个是群号
-                    day_offset = int(parts[0])
-                    target_group = parts[1]
+                day_offset = 1  # 默认为昨天
+                target_group = None
+                
+                # 处理时间描述词
+                time_words = {
+                    '今天': 0,
+                    '昨天': 1,
+                    '前天': 2
+                }
+                
+                if len(parts) >= 1:
+                    # 处理第一个参数
+                    if parts[0] in time_words:
+                        # 时间描述词
+                        day_offset = time_words[parts[0]]
+                    elif parts[0].isdigit():
+                        if len(parts[0]) > 4:
+                            # 长数字，认为是群号
+                            target_group = parts[0]
+                        else:
+                            # 短数字，认为是天数
+                            day_offset = int(parts[0])
+                
+                # 处理第二个参数（如果有）
+                if len(parts) >= 2:
+                    # 第二个参数应该是群号
+                    if parts[1].isdigit():
+                        target_group = parts[1]
             
+            log_info(f"命令解析结果：日期偏移 = {day_offset}，目标群 = {target_group}")
             await manual_summary(bot, ev, day_offset, target_group)
         except ValueError:
-            await bot.send(ev, '参数格式错误。使用方法：\n日报 [天数] [群号]\n例如：\n日报 - 查看昨天的本群日报\n日报 1 - 查看昨天的本群日报\n日报 2 123456 - 查看前天群123456的日报\n日报 启用 - 启用日报定时功能\n日报 禁用 - 禁用日报定时功能')
+            await bot.send(ev, '参数格式错误。使用方法：\n日报 [天数/时间描述词] [群号]\n例如：\n日报 - 查看昨天的本群日报\n日报 昨天 - 查看昨天的本群日报\n日报 2 - 查看前天的本群日报\n日报 昨天 123456 - 查看昨天群123456的日报\n日报 启用 - 启用日报定时功能\n日报 禁用 - 禁用日报定时功能')
         except Exception as e:
             log_error_msg(f"查看日报失败: {str(e)}")
             await bot.send(ev, '查看日报失败，请查看日志')
@@ -729,6 +830,14 @@ def start_scheduler(sv: Service):
         id='dailysum_morning'
     )
     log_info("已添加早上 8:30 的定时任务")
+    
+    # 添加日志备份定时任务，每天23:59执行
+    scheduler.add_job(
+        backup_logs,
+        CronTrigger(hour=23, minute=59),
+        id='dailysum_log_backup'
+    )
+    log_info("已添加23:59的日志备份定时任务")
     
     # # 保留原有的下午和晚上的定时任务
     # scheduler.add_job(
