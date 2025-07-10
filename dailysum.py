@@ -142,23 +142,29 @@ class DeepSeekClient:
         }
         log_info(f"DeepSeekClient 初始化完成，API Key: {'已设置' if api_key else '未设置'}")
         
-    async def generate(self, prompt, model=AI_MODEL, temperature=AI_TEMPERATURE):
+    async def generate(self, prompt, model=AI_MODEL, temperature=AI_TEMPERATURE, max_retries=3, timeout=120.0):
         log_info(f"开始生成AI摘要，模型: {model}, 温度: {temperature}")
         log_debug(f"提示词: {prompt[:200]}...")
         
-        async with httpx.AsyncClient() as client:
+        # 记录请求数据大小
+        request_size = len(prompt.encode('utf-8'))
+        log_info(f"请求数据大小: {request_size / 1024:.2f} KB")
+        
+        retry_count = 0
+        while retry_count < max_retries:
             try:
-                log_debug("发送API请求...")
-                response = await client.post(
-                    self.base_url,
-                    headers=self.headers,
-                    json={
-                        "model": model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": temperature
-                    },
-                    timeout=120.0
-                )
+                log_debug(f"尝试API请求 (尝试 {retry_count + 1}/{max_retries})...")
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        self.base_url,
+                        headers=self.headers,
+                        json={
+                            "model": model,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": temperature
+                        },
+                        timeout=timeout
+                    )
                 
                 if response.status_code == 200:
                     result = response.json()
@@ -166,13 +172,38 @@ class DeepSeekClient:
                     log_info(f"AI生成成功，生成内容长度: {len(content)}")
                     log_debug(f"生成内容前100字符: {content[:100]}...")
                     return content
+                elif response.status_code == 400:
+                    # 如果是请求过大的错误，尝试减少输入长度
+                    log_warning(f"请求数据过大 (状态码: {response.status_code})，尝试减少输入大小")
+                    
+                    # 裁剪提示词到原来的70%
+                    prompt_parts = prompt.split("聊天记录：\n")
+                    if len(prompt_parts) == 2:
+                        instruction, chat_log = prompt_parts
+                        # 保留前70%的聊天记录
+                        reduced_chat_log = chat_log[:int(len(chat_log) * 0.7)]
+                        prompt = f"{instruction}聊天记录：\n{reduced_chat_log}\n\n[注: 由于长度限制，仅显示部分聊天记录]"
+                        log_info(f"提示词已减少到原来的70%，新大小: {len(prompt.encode('utf-8')) / 1024:.2f} KB")
+                    else:
+                        log_error_msg("无法裁剪提示词，格式不符合预期")
+                        return None
                 else:
                     log_error_msg(f"DeepSeek API调用失败: {response.status_code} {response.text}")
-                    return None
+                    # 如果不是400错误，可能是其他API问题，尝试重试
+                    retry_count += 1
+                    await asyncio.sleep(2)  # 等待2秒再重试
+            except httpx.TimeoutException:
+                log_warning(f"API请求超时，尝试重试 ({retry_count + 1}/{max_retries})")
+                retry_count += 1
+                await asyncio.sleep(2)  # 等待2秒再重试
             except Exception as e:
                 log_error_msg(f"DeepSeek API调用出错: {str(e)}")
                 log_error_msg(traceback.format_exc())
-                return None
+                retry_count += 1
+                await asyncio.sleep(2)  # 等待2秒再重试
+        
+        log_error_msg(f"达到最大重试次数 ({max_retries})，AI生成失败")
+        return None
 
 # AI客户端实例
 ai_client = DeepSeekClient(AI_API_KEY)
@@ -252,6 +283,9 @@ async def parse_syslog(log_path, start_time=None, end_time=None, target_group=No
                             # 解析发送者QQ号
                             sender_qq = sender_info.split('@')[0]
                             
+                            # 简化CQ码内容
+                            simplified_content = simplify_cq_code(content)
+                            
                             # 将消息添加到对应群
                             if group_id not in group_messages:
                                 group_messages[group_id] = []
@@ -259,7 +293,7 @@ async def parse_syslog(log_path, start_time=None, end_time=None, target_group=No
                             group_messages[group_id].append({
                                 'time': log_time.strftime('%Y-%m-%d %H:%M:%S'),
                                 'qq': sender_qq,
-                                'content': content
+                                'content': simplified_content
                             })
                         except Exception as e:
                             log_error_msg(f"解析日志行出错: {str(e)}，行内容: {line[:100]}")
@@ -303,13 +337,20 @@ async def save_group_logs(group_messages, date_str):
             log_warning(f"群 {group_id} 没有消息，跳过保存")
             continue
         
+        # 简化CQ码
+        simplified_messages = []
+        for msg in messages:
+            simplified_msg = msg.copy()  # 创建消息的副本
+            simplified_msg['content'] = simplify_cq_code(msg['content'])  # 简化内容
+            simplified_messages.append(simplified_msg)
+        
         file_path = os.path.join(DATA_DIR, f"{group_id}_{date_str}.json")
         log_info(f"保存群聊日志到文件: {file_path}")
         
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(messages, f, ensure_ascii=False, indent=2)
-            log_info(f"保存群 {group_id} 的日志到 {file_path}，共 {len(messages)} 条消息")
+                json.dump(simplified_messages, f, ensure_ascii=False, indent=2)
+            log_info(f"保存群 {group_id} 的日志到 {file_path}，共 {len(simplified_messages)} 条消息")
         except Exception as e:
             log_error_msg(f"保存群聊日志出错: {str(e)}")
             log_error_msg(traceback.format_exc())
@@ -418,6 +459,114 @@ async def load_test_data(date_str):
     
     return group_messages, date_str
 
+# 处理CQ码图片链接，将其简化为[图片]标识
+def simplify_cq_code(content):
+    """
+    将CQ码简化为简单标识
+    :param content: 消息内容
+    :return: 简化后的消息内容
+    """
+    if not isinstance(content, str):
+        return content
+    
+    # 匹配常见的CQ码类型
+    content = re.sub(r'\[CQ:image[^\]]+\]', '[图片]', content)
+    content = re.sub(r'\[CQ:face[^\]]+\]', '[表情]', content)
+    content = re.sub(r'\[CQ:at[^\]]+\]', '[有人@]', content)
+    content = re.sub(r'\[CQ:share[^\]]+\]', '[分享]', content)
+    content = re.sub(r'\[CQ:record[^\]]+\]', '[语音]', content)
+    content = re.sub(r'\[CQ:video[^\]]+\]', '[视频]', content)
+    content = re.sub(r'\[CQ:xml[^\]]+\]', '[XML卡片]', content)
+    content = re.sub(r'\[CQ:json[^\]]+\]', '[JSON卡片]', content)
+    content = re.sub(r'\[CQ:music[^\]]+\]', '[音乐]', content)
+    content = re.sub(r'\[CQ:reply[^\]]+\]', '[回复]', content)
+    content = re.sub(r'\[CQ:forward[^\]]+\]', '[合并转发]', content)
+    content = re.sub(r'\[CQ:redbag[^\]]+\]', '[红包]', content)
+    
+    # 处理其他未知类型的CQ码
+    content = re.sub(r'\[CQ:[^\]]+\]', '[特殊消息]', content)
+    
+    # 去除过长的URL链接
+    content = re.sub(r'https?://\S{30,}', '[链接]', content)
+    
+    # 去除连续的空行
+    content = re.sub(r'\n{3,}', '\n\n', content)
+    
+    return content
+
+# 优化聊天记录格式
+def optimize_chat_format(messages):
+    """
+    优化聊天记录格式，减少冗余信息，压缩数据
+    :param messages: 原始聊天记录列表
+    :return: 优化后的聊天记录文本
+    """
+    if not messages:
+        return ""
+    
+    optimized_logs = []
+    current_speaker = None
+    combined_messages = []
+    last_time = None
+    
+    # 过滤无意义的短消息和表情包
+    filtered_messages = []
+    for msg in messages:
+        content = simplify_cq_code(msg['content'])
+        # 过滤仅包含表情、短回复的无意义消息
+        if content in ['[表情]', '[图片]', '6', '？', '?', '。', '哦', '嗯', '啊', 'ok', '666', '???']:
+            continue
+        # 过滤极短消息（少于2个字符）
+        if len(content) < 2:
+            continue
+        filtered_messages.append({
+            'time': msg['time'],
+            'qq': msg['qq'],
+            'content': content
+        })
+    
+    # 如果过滤后消息太少，使用原始消息
+    if len(filtered_messages) < len(messages) * 0.3 and len(filtered_messages) < 10:
+        filtered_messages = messages
+    
+    for msg in filtered_messages:
+        time_str = msg['time'].split(' ')[1][:5]  # 只取HH:MM部分
+        speaker = msg['qq']
+        content = simplify_cq_code(msg['content'])
+        
+        # 如果距离上一条消息时间超过5分钟，不合并
+        current_time = datetime.strptime(msg['time'], '%Y-%m-%d %H:%M:%S')
+        if last_time and (current_time - last_time).seconds > 300:  # 5分钟 = 300秒
+            # 处理之前累积的消息
+            if combined_messages:
+                combined_content = " | ".join(combined_messages)
+                optimized_logs.append(f"[{last_time.strftime('%H:%M')}] {current_speaker}: {combined_content}")
+                combined_messages = []
+            current_speaker = None  # 重置当前发言人
+        
+        last_time = current_time
+        
+        # 如果是同一个发言人的连续消息且内容不太长，合并处理
+        if speaker == current_speaker and len(combined_messages) < 3 and sum(len(m) for m in combined_messages) < 100:
+            combined_messages.append(content)
+        else:
+            # 如果有之前累积的消息，先处理
+            if combined_messages:
+                combined_content = " | ".join(combined_messages)
+                optimized_logs.append(f"[{time_str}] {current_speaker}: {combined_content}")
+            
+            # 重置当前发言人和消息
+            current_speaker = speaker
+            combined_messages = [content]
+    
+    # 处理最后一组消息
+    if combined_messages:
+        time_str = last_time.strftime('%H:%M') if last_time else "00:00"
+        combined_content = " | ".join(combined_messages)
+        optimized_logs.append(f"[{time_str}] {current_speaker}: {combined_content}")
+    
+    return "\n".join(optimized_logs)
+
 # 生成群聊摘要
 @logged
 async def generate_summary(group_id, date_str):
@@ -445,9 +594,27 @@ async def generate_summary(group_id, date_str):
             log_warning(f"群 {group_id} 在 {date_str} 没有聊天记录")
             return None
         
-        # 构建聊天记录文本
-        chat_log = "\n".join([f"[{msg['time']}] {msg['qq']}: {msg['content']}" for msg in messages])
+        # 使用优化的聊天记录格式
+        chat_log = optimize_chat_format(messages)
         log_info(f"构建聊天记录文本完成，长度: {len(chat_log)}")
+        
+        # 如果聊天记录过长，进行截断处理
+        MAX_CHAT_LOG_LENGTH = 50000  # 最大聊天记录长度限制，防止API调用失败
+        
+        if len(chat_log) > MAX_CHAT_LOG_LENGTH:
+            log_warning(f"聊天记录超出长度限制 ({len(chat_log)} > {MAX_CHAT_LOG_LENGTH})，将进行截断")
+            
+            # 方式一：保留前后部分
+            # prefix = chat_log[:MAX_CHAT_LOG_LENGTH // 4]
+            # suffix = chat_log[-MAX_CHAT_LOG_LENGTH // 4:]
+            # chat_log = f"{prefix}\n...\n[中间{len(chat_log) - len(prefix) - len(suffix)}字符被省略]\n...\n{suffix}"
+            
+            # 方式二：直接截断尾部
+            chat_log = chat_log[:MAX_CHAT_LOG_LENGTH]
+            chat_log += "\n\n[由于长度限制，部分消息被省略]"
+            
+            log_info(f"截断后的聊天记录长度: {len(chat_log)}")
+        
         log_debug(f"聊天记录前200字符: {chat_log[:200]}...")
         
         # 检查API Key
