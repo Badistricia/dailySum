@@ -13,13 +13,22 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 
 # 定时任务配置
 ENABLE_SCHEDULER = True  # 是否启用定时任务
-SUMMARY_HOUR_AFTERNOON = 18  # 下午6点进行总结
-SUMMARY_HOUR_NIGHT = 0  # 晚上12点进行总结
+SUMMARY_HOUR = 8  # 每天几点发送日报
+SUMMARY_MINUTE = 30  # 每天几分发送日报
+SUMMARY_START_HOUR = 4  # 统计时间段的起始小时（例如：4点到次日4点）
 
 # AI配置
 AI_API_KEY = "sk-476330950dd24ff6869b6a301930f275"  # DeepSeek API密钥
-AI_MODEL = "deepseek-chat"  # AI模型名称
+AI_MODEL = "deepseek-reasoner"  # AI模型名称
 AI_TEMPERATURE = 1.0  # AI生成温度
+
+# 群配置
+DAILY_SUM_GROUPS = []  # 日报功能启用的群列表，为空时对所有群启用
+# 示例：DAILY_SUM_GROUPS = ['123456789', '987654321'] # 只在这两个群启用日报功能
+
+# 并发控制
+MAX_CONCURRENT_TASKS = 3  # 最大并发任务数量
+TASK_INTERVAL_SECONDS = 10  # 每个群任务之间的间隔秒数
 
 # 提示词配置
 PROMPT_TEMPLATE = """请根据【{group_name}】今天的聊天记录，整理一份QQ群日报，要求：  
@@ -30,6 +39,7 @@ PROMPT_TEMPLATE = """请根据【{group_name}】今天的聊天记录，整理�
 
 - 总结要简洁，不超过800字
 - 聊天记录中[图片]表示图片内容，[链接]表示网址
+- 不要显示出字体总数
 
 聊天记录：
 {chat_log}

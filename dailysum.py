@@ -742,7 +742,13 @@ async def execute_daily_summary(bot, target_groups=None, day_offset=0, start_hou
         log_warning(f"没有找到任何群的聊天记录，无法生成日报")
         return
     
-    # 处理每个群
+    # 处理白名单群
+    if not target_groups and DAILY_SUM_GROUPS:
+        target_groups = DAILY_SUM_GROUPS
+        log_info(f"使用配置的白名单群: {target_groups}")
+    
+    # 过滤需要处理的群
+    groups_to_process = {}
     for group_id, messages in group_messages.items():
         # 如果指定了目标群，且当前群不在目标群中，则跳过
         if target_groups and group_id not in target_groups:
@@ -753,28 +759,80 @@ async def execute_daily_summary(bot, target_groups=None, day_offset=0, start_hou
             log_warning(f"群 {group_id} 没有消息，跳过生成日报")
             continue
         
-        log_info(f"开始处理群 {group_id} 的日报生成")
-        
-        # 生成摘要
-        log_info(f"为群 {group_id} 生成摘要...")
-        summary = await generate_summary(group_id, date_str)
-        
-        if not summary:
-            log_warning(f"群 {group_id} 的摘要生成失败，跳过")
-            continue
-        
-        # 发送日报
-        try:
-            log_info(f"开始向群 {group_id} 发送文本摘要...")
-            message_to_send = f"【{date_str} 群聊日报】\n统计范围：{start_time.strftime('%m-%d %H:%M')} - {end_time.strftime('%m-%d %H:%M')}\n\n{summary}"
-            await bot.send_group_msg(
-                group_id=int(group_id),
-                message=message_to_send
-            )
-            log_info(f"成功向群 {group_id} 发送文本日报")
-        except Exception as e:
-            log_error_msg(f"向群 {group_id} 发送日报出错: {str(e)}")
-            log_error_msg(traceback.format_exc())
+        groups_to_process[group_id] = messages
+    
+    # 创建信号量控制并发
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
+    
+    async def process_group(group_id, messages):
+        async with semaphore:
+            log_info(f"开始处理群 {group_id} 的日报生成")
+            
+            # 生成摘要
+            log_info(f"为群 {group_id} 生成摘要...")
+            summary = await generate_summary(group_id, date_str)
+            
+            if not summary:
+                log_warning(f"群 {group_id} 的摘要生成失败，跳过")
+                return False
+            
+            # 发送日报
+            try:
+                log_info(f"开始向群 {group_id} 发送文本摘要...")
+                message_to_send = f"【{date_str} 群聊日报】\n统计范围：{start_time.strftime('%m-%d %H:%M')} - {end_time.strftime('%m-%d %H:%M')}\n\n{summary}"
+                await bot.send_group_msg(
+                    group_id=int(group_id),
+                    message=message_to_send
+                )
+                log_info(f"成功向群 {group_id} 发送文本日报")
+                return True
+            except Exception as e:
+                log_error_msg(f"向群 {group_id} 发送日报出错: {str(e)}")
+                log_error_msg(traceback.format_exc())
+                return False
+            finally:
+                # 添加间隔，避免短时间内发送太多消息
+                await asyncio.sleep(TASK_INTERVAL_SECONDS)
+    
+    # 创建所有群的任务
+    tasks = [process_group(group_id, messages) for group_id, messages in groups_to_process.items()]
+    
+    # 等待所有任务完成
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # 统计结果
+    success_count = sum(1 for r in results if r is True)
+    fail_count = sum(1 for r in results if r is False)
+    error_count = sum(1 for r in results if isinstance(r, Exception))
+    
+    log_info(f"日报生成任务完成，总计 {len(tasks)} 个群，成功 {success_count} 个，失败 {fail_count} 个，错误 {error_count} 个")
+
+# 获取日报配置状态
+@logged
+async def get_daily_config_status():
+    """
+    获取日报配置状态
+    :return: 配置状态文本
+    """
+    status_text = "【群聊日报配置状态】\n"
+    status_text += f"定时任务: {'启用' if ENABLE_SCHEDULER else '禁用'}\n"
+    status_text += f"发送时间: 每天{SUMMARY_HOUR:02d}:{SUMMARY_MINUTE:02d}\n"
+    status_text += f"统计范围: 每天{SUMMARY_START_HOUR:02d}:00到次日{SUMMARY_START_HOUR:02d}:00\n"
+    status_text += f"并发任务数: {MAX_CONCURRENT_TASKS}\n"
+    status_text += f"任务间隔: {TASK_INTERVAL_SECONDS}秒\n"
+    
+    if DAILY_SUM_GROUPS:
+        status_text += f"启用群数量: {len(DAILY_SUM_GROUPS)}个\n"
+        status_text += "启用群列表:\n"
+        for i, group_id in enumerate(DAILY_SUM_GROUPS):
+            if i < 10:  # 只显示前10个
+                status_text += f"- {group_id}\n"
+        if len(DAILY_SUM_GROUPS) > 10:
+            status_text += f"...等共{len(DAILY_SUM_GROUPS)}个群"
+    else:
+        status_text += "启用状态: 所有群"
+    
+    return status_text
 
 # 手动触发总结
 @logged
@@ -887,7 +945,7 @@ scheduler_running = False
 
 @sv.on_prefix(['日报'])
 async def view_daily_report(bot, ev):
-    """查看指定日期的日报"""
+    """查看指定日期的日报或管理日报功能"""
     global scheduler_running  # 将global声明移到函数开头
     
     if not priv.check_priv(ev, priv.ADMIN):
@@ -907,7 +965,7 @@ async def view_daily_report(bot, ev):
         try:
             start_scheduler(sv)
             scheduler_running = True
-            await bot.send(ev, '日报定时功能已启用，将在每天早上8:30发送昨天4点到今天4点的日报')
+            await bot.send(ev, f'日报定时功能已启用，将在每天{SUMMARY_HOUR:02d}:{SUMMARY_MINUTE:02d}发送日报')
         except Exception as e:
             log_error_msg(f"启用日报定时功能失败: {str(e)}")
             await bot.send(ev, '启用日报定时功能失败，请查看日志')
@@ -919,15 +977,65 @@ async def view_daily_report(bot, ev):
             return
             
         try:
-            # 移除所有日报相关的定时任务
-            scheduler.remove_job('dailysum_morning')
-            scheduler.remove_job('dailysum_afternoon')
-            scheduler.remove_job('dailysum_night')
+            # 移除日报相关的定时任务
+            scheduler.remove_job('dailysum_daily')
+            scheduler.remove_job('dailysum_log_backup')
             scheduler_running = False
             await bot.send(ev, '日报定时功能已禁用')
         except Exception as e:
             log_error_msg(f"禁用日报定时功能失败: {str(e)}")
             await bot.send(ev, '禁用日报定时功能失败，请查看日志')
+    
+    elif msg.startswith('状态'):
+        # 查看当前配置状态
+        try:
+            status = await get_daily_config_status()
+            await bot.send(ev, status)
+        except Exception as e:
+            log_error_msg(f"查看日报状态失败: {str(e)}")
+            await bot.send(ev, '查看日报状态失败，请查看日志')
+    
+    elif msg.startswith('添加群'):
+        # 添加群到白名单
+        try:
+            parts = msg.split()
+            if len(parts) < 2 or not parts[1].isdigit():
+                await bot.send(ev, '参数错误，格式：日报 添加群 123456789')
+                return
+            
+            group_id = parts[1]
+            if group_id in DAILY_SUM_GROUPS:
+                await bot.send(ev, f'群 {group_id} 已在日报白名单中')
+                return
+            
+            DAILY_SUM_GROUPS.append(group_id)
+            # 保存配置
+            await save_group_config()
+            await bot.send(ev, f'已添加群 {group_id} 到日报白名单')
+        except Exception as e:
+            log_error_msg(f"添加群到白名单失败: {str(e)}")
+            await bot.send(ev, '添加失败，请查看日志')
+    
+    elif msg.startswith('删除群') or msg.startswith('移除群'):
+        # 从白名单移除群
+        try:
+            parts = msg.split()
+            if len(parts) < 2 or not parts[1].isdigit():
+                await bot.send(ev, '参数错误，格式：日报 删除群 123456789')
+                return
+            
+            group_id = parts[1]
+            if group_id not in DAILY_SUM_GROUPS:
+                await bot.send(ev, f'群 {group_id} 不在日报白名单中')
+                return
+            
+            DAILY_SUM_GROUPS.remove(group_id)
+            # 保存配置
+            await save_group_config()
+            await bot.send(ev, f'已从日报白名单移除群 {group_id}')
+        except Exception as e:
+            log_error_msg(f"从白名单移除群失败: {str(e)}")
+            await bot.send(ev, '移除失败，请查看日志')
             
     else:
         # 查看日报
@@ -970,7 +1078,7 @@ async def view_daily_report(bot, ev):
             log_info(f"命令解析结果：日期偏移 = {day_offset}，目标群 = {target_group}")
             await manual_summary(bot, ev, day_offset, target_group)
         except ValueError:
-            await bot.send(ev, '参数格式错误。使用方法：\n日报 [天数/时间描述词] [群号]\n例如：\n日报 - 查看昨天的本群日报\n日报 昨天 - 查看昨天的本群日报\n日报 2 - 查看前天的本群日报\n日报 昨天 123456 - 查看昨天群123456的日报\n日报 启用 - 启用日报定时功能\n日报 禁用 - 禁用日报定时功能')
+            await bot.send(ev, '参数格式错误。使用方法：\n日报 [天数/时间描述词] [群号] - 查看指定日报\n日报 状态 - 查看当前配置\n日报 添加群 123456789 - 添加群到白名单\n日报 删除群 123456789 - 从白名单删除群\n日报 启用/禁用 - 控制定时功能')
         except Exception as e:
             log_error_msg(f"查看日报失败: {str(e)}")
             await bot.send(ev, '查看日报失败，请查看日志')
@@ -989,14 +1097,14 @@ def start_scheduler(sv: Service):
     
     bot = get_bot()
     
-    # 每天早上8:30发送昨天4点到今天4点的日报
+    # 每天定时发送日报
     scheduler.add_job(
         execute_daily_summary,
-        CronTrigger(hour=8, minute=30),
-        args=(bot, None, 0, 4),  # bot, target_groups=None, day_offset=0, start_hour=4
-        id='dailysum_morning'
+        CronTrigger(hour=SUMMARY_HOUR, minute=SUMMARY_MINUTE),
+        args=(bot, None, 0, SUMMARY_START_HOUR),  # bot, target_groups=None, day_offset=0, start_hour=4
+        id='dailysum_daily'
     )
-    log_info("已添加早上 8:30 的定时任务")
+    log_info(f"已添加每日 {SUMMARY_HOUR:02d}:{SUMMARY_MINUTE:02d} 的日报定时任务")
     
     # 添加日志备份定时任务，每天23:59执行
     scheduler.add_job(
@@ -1006,21 +1114,39 @@ def start_scheduler(sv: Service):
     )
     log_info("已添加23:59的日志备份定时任务")
     
-    # # 保留原有的下午和晚上的定时任务
-    # scheduler.add_job(
-    #     execute_daily_summary,
-    #     CronTrigger(hour=SUMMARY_HOUR_AFTERNOON, minute=0),
-    #     args=(bot,),
-    #     id='dailysum_afternoon'
-    # )
-    # log_info(f"已添加下午 {SUMMARY_HOUR_AFTERNOON}:00 的定时任务")
-    
-    # scheduler.add_job(
-    #     execute_daily_summary,
-    #     CronTrigger(hour=SUMMARY_HOUR_NIGHT, minute=0),
-    #     args=(bot,),
-    #     id='dailysum_night'
-    # )
-    # log_info(f"已添加晚上 {SUMMARY_HOUR_NIGHT}:00 的定时任务")
-    
     log_info('群聊日报定时任务启动完成') 
+
+# 保存群配置
+@logged
+async def save_group_config():
+    """保存群配置到文件"""
+    try:
+        config_file = os.path.join(DATA_DIR, 'group_config.json')
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump({
+                'daily_sum_groups': DAILY_SUM_GROUPS
+            }, f, ensure_ascii=False, indent=2)
+        log_info(f"已保存群配置到 {config_file}")
+        return True
+    except Exception as e:
+        log_error_msg(f"保存群配置失败: {str(e)}")
+        return False
+
+# 加载群配置
+@logged
+async def load_group_config():
+    """从文件加载群配置"""
+    global DAILY_SUM_GROUPS
+    try:
+        config_file = os.path.join(DATA_DIR, 'group_config.json')
+        if os.path.exists(config_file):
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                DAILY_SUM_GROUPS = config.get('daily_sum_groups', [])
+            log_info(f"已从 {config_file} 加载群配置，白名单群数量: {len(DAILY_SUM_GROUPS)}")
+        else:
+            log_info("群配置文件不存在，使用默认配置")
+        return True
+    except Exception as e:
+        log_error_msg(f"加载群配置失败: {str(e)}")
+        return False 
