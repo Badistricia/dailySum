@@ -27,14 +27,14 @@ from hoshino import Service, priv, logger, get_bot
 from .config import *
 from .logger_helper import log_debug, log_info, log_warning, log_error_msg, log_critical, logged
 
-# 创建服务实例
-sv = Service(
-    name='群聊日报',
-    use_priv=priv.ADMIN,  # 使用权限：管理员
-    manage_priv=priv.ADMIN,  # 管理权限：管理员
-    visible=True,  # 可见性：可见
-    enable_on_default=False,  # 默认关闭
-)
+# 不再创建服务实例，改为从__init__.py接收
+# sv = Service(
+#     name='群聊日报',
+#     use_priv=priv.ADMIN,  # 使用权限：管理员
+#     manage_priv=priv.ADMIN,  # 管理权限：管理员
+#     visible=True,  # 可见性：可见
+#     enable_on_default=False,  # 默认关闭
+# )
 
 # 确保data目录存在
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -943,6 +943,9 @@ async def backup_logs():
 scheduler_running = False
 
 
+# 移除重复的命令处理函数
+# 删除下面的代码块
+'''
 @sv.on_prefix(['日报'])
 async def view_daily_report(bot, ev):
     """查看指定日期的日报或管理日报功能"""
@@ -1082,12 +1085,151 @@ async def view_daily_report(bot, ev):
         except Exception as e:
             log_error_msg(f"查看日报失败: {str(e)}")
             await bot.send(ev, '查看日报失败，请查看日志')
+'''
 
-# 启动定时任务
-def start_scheduler(sv: Service):
+# 将命令处理逻辑移至独立函数，供__init__.py调用
+@logged
+async def handle_daily_report_cmd(bot, ev, msg):
+    """处理日报相关命令"""
+    global scheduler_running
+    
+    if not priv.check_priv(ev, priv.ADMIN):
+        await bot.send(ev, '抱歉，只有管理员才能使用日报管理功能')
+        return
+    
+    # 解析命令
+    if msg.startswith(('启用', '开启')):
+        # 启用日报功能
+        if scheduler_running:
+            await bot.send(ev, '日报定时功能已经在运行中')
+            return
+            
+        try:
+            start_scheduler(None)  # 不再需要传递sv参数
+            scheduler_running = True
+            await bot.send(ev, f'日报定时功能已启用，将在每天{SUMMARY_HOUR:02d}:{SUMMARY_MINUTE:02d}发送日报')
+        except Exception as e:
+            log_error_msg(f"启用日报定时功能失败: {str(e)}")
+            await bot.send(ev, '启用日报定时功能失败，请查看日志')
+            
+    elif msg.startswith(('禁用', '关闭')):
+        # 禁用日报功能
+        if not scheduler_running:
+            await bot.send(ev, '日报定时功能已经是关闭状态')
+            return
+            
+        try:
+            # 移除日报相关的定时任务
+            scheduler.remove_job('dailysum_daily')
+            scheduler.remove_job('dailysum_log_backup')
+            scheduler_running = False
+            await bot.send(ev, '日报定时功能已禁用')
+        except Exception as e:
+            log_error_msg(f"禁用日报定时功能失败: {str(e)}")
+            await bot.send(ev, '禁用日报定时功能失败，请查看日志')
+    
+    elif msg.startswith('状态'):
+        # 查看当前配置状态
+        try:
+            status = await get_daily_config_status()
+            await bot.send(ev, status)
+        except Exception as e:
+            log_error_msg(f"查看日报状态失败: {str(e)}")
+            await bot.send(ev, '查看日报状态失败，请查看日志')
+    
+    elif msg.startswith('添加群'):
+        # 添加群到白名单
+        try:
+            parts = msg.split()
+            if len(parts) < 2 or not parts[1].isdigit():
+                await bot.send(ev, '参数错误，格式：日报 添加群 123456789')
+                return
+            
+            group_id = parts[1]
+            if group_id in DAILY_SUM_GROUPS:
+                await bot.send(ev, f'群 {group_id} 已在日报白名单中')
+                return
+            
+            DAILY_SUM_GROUPS.append(group_id)
+            # 保存配置
+            await save_group_config()
+            await bot.send(ev, f'已添加群 {group_id} 到日报白名单')
+        except Exception as e:
+            log_error_msg(f"添加群到白名单失败: {str(e)}")
+            await bot.send(ev, '添加失败，请查看日志')
+    
+    elif msg.startswith('删除群') or msg.startswith('移除群'):
+        # 从白名单移除群
+        try:
+            parts = msg.split()
+            if len(parts) < 2 or not parts[1].isdigit():
+                await bot.send(ev, '参数错误，格式：日报 删除群 123456789')
+                return
+            
+            group_id = parts[1]
+            if group_id not in DAILY_SUM_GROUPS:
+                await bot.send(ev, f'群 {group_id} 不在日报白名单中')
+                return
+            
+            DAILY_SUM_GROUPS.remove(group_id)
+            # 保存配置
+            await save_group_config()
+            await bot.send(ev, f'已从日报白名单移除群 {group_id}')
+        except Exception as e:
+            log_error_msg(f"从白名单移除群失败: {str(e)}")
+            await bot.send(ev, '移除失败，请查看日志')
+            
+    else:
+        # 查看日报
+        try:
+            if not msg:
+                # 没有参数，默认查看昨天的日报
+                day_offset = 1
+                target_group = None
+            else:
+                parts = msg.split()
+                day_offset = 1  # 默认为昨天
+                target_group = None
+                
+                # 处理时间描述词
+                time_words = {
+                    '今天': 0,
+                    '昨天': 1,
+                    '前天': 2
+                }
+                
+                if len(parts) >= 1:
+                    # 处理第一个参数
+                    if parts[0] in time_words:
+                        # 时间描述词
+                        day_offset = time_words[parts[0]]
+                    elif parts[0].isdigit():
+                        if len(parts[0]) > 4:
+                            # 长数字，认为是群号
+                            target_group = parts[0]
+                        else:
+                            # 短数字，认为是天数
+                            day_offset = int(parts[0])
+                
+                # 处理第二个参数（如果有）
+                if len(parts) >= 2:
+                    # 第二个参数应该是群号
+                    if parts[1].isdigit():
+                        target_group = parts[1]
+            
+            log_info(f"命令解析结果：日期偏移 = {day_offset}，目标群 = {target_group}")
+            await manual_summary(bot, ev, day_offset, target_group)
+        except ValueError:
+            await bot.send(ev, '参数格式错误。使用方法：\n日报 [天数/时间描述词] [群号] - 查看指定日报\n日报 状态 - 查看当前配置\n日报 添加群 123456789 - 添加群到白名单\n日报 删除群 123456789 - 从白名单删除群\n日报 启用/禁用 - 控制定时功能')
+        except Exception as e:
+            log_error_msg(f"查看日报失败: {str(e)}")
+            await bot.send(ev, '查看日报失败，请查看日志')
+
+# 修改启动定时任务函数，不再需要sv参数
+def start_scheduler(sv=None):
     """
     启动定时任务
-    :param sv: 服务实例
+    :param sv: 服务实例，不再使用
     """
     if not ENABLE_SCHEDULER:
         log_info("定时任务已禁用，不启动定时器")
@@ -1114,7 +1256,7 @@ def start_scheduler(sv: Service):
     )
     log_info("已添加23:59的日志备份定时任务")
     
-    log_info('群聊日报定时任务启动完成') 
+    log_info('群聊日报定时任务启动完成')
 
 # 保存群配置
 @logged

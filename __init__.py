@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 from hoshino import Service, priv
 from .logger_helper import log_info, log_warning, log_error_msg
-from .dailysum import start_scheduler, manual_summary, backup_logs, load_group_config
+from .dailysum import start_scheduler, manual_summary, backup_logs, load_group_config, handle_daily_report_cmd
 
 sv = Service(
     name='dailySum',
@@ -35,18 +35,21 @@ async def init_config():
     """初始化配置"""
     await load_group_config()
 
-# 正则表达式用于匹配群号和日期描述词
-GROUP_ID_PATTERN = r'^日报\s+(\d{5,})$'  # 至少5位数字的群号
-YESTERDAY_GROUP_ID_PATTERN = r'^日报\s+(昨天|前天|今天)\s+(\d{5,})$'  # 日期描述词 + 群号
-DAY_PATTERN = r'^日报\s+(昨天|前天|今天)$'  # 仅日期描述词
+# 统一处理所有日报命令
+@sv.on_prefix(['日报'])
+async def daily_report_cmd(bot, ev):
+    msg = ev.message.extract_plain_text().strip()
+    log_info(f"收到日报命令，群号:{ev['group_id']}, 用户:{ev['user_id']}, 参数:{msg}")
+    await handle_daily_report_cmd(bot, ev, msg)
 
-# 注册命令
+# 原有的处理函数，保留以兼容已发送的命令
+# 如果不需要兼容性，可以删除下面这些函数
 @sv.on_fullmatch(('日报', '群聊日报'))
 async def daily_summary(bot, ev):
     log_info(f"收到日报命令，群号:{ev['group_id']}, 用户:{ev['user_id']}")
-    await manual_summary(bot, ev, day_offset=0, target_group=None)
+    await manual_summary(bot, ev, day_offset=1, target_group=None)  # 默认改为1天偏移，查看昨天的日报
 
-@sv.on_rex(DAY_PATTERN)
+@sv.on_rex(r'^日报\s+(昨天|前天|今天)$')
 async def day_summary(bot, ev):
     match = ev['match']
     day_str = match.group(1)
@@ -54,14 +57,14 @@ async def day_summary(bot, ev):
     log_info(f"收到{day_str}日报命令，群号:{ev['group_id']}, 用户:{ev['user_id']}, 日期偏移:{day_offset}")
     await manual_summary(bot, ev, day_offset=day_offset, target_group=None)
 
-@sv.on_rex(GROUP_ID_PATTERN)
+@sv.on_rex(r'^日报\s+(\d{5,})$')
 async def group_daily_summary(bot, ev):
     match = ev['match']
     target_group_id = match.group(1)
     log_info(f"收到指定群日报命令，当前群号:{ev['group_id']}, 目标群号:{target_group_id}, 用户:{ev['user_id']}")
-    await manual_summary(bot, ev, day_offset=0, target_group=target_group_id)
+    await manual_summary(bot, ev, day_offset=1, target_group=target_group_id)  # 默认改为1天偏移，查看昨天的日报
 
-@sv.on_rex(YESTERDAY_GROUP_ID_PATTERN)
+@sv.on_rex(r'^日报\s+(昨天|前天|今天)\s+(\d{5,})$')
 async def yesterday_group_summary(bot, ev):
     match = ev['match']
     day_str = match.group(1)
