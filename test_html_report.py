@@ -1,16 +1,13 @@
 import os
 import json
 import base64
-from datetime import datetime, timedelta
+from datetime import datetime
 from io import BytesIO
-from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
-import asyncio
 import traceback
 
-from hoshino import Service
-from nonebot.message import MessageSegment  # 修改为与 dailysum.py 相同的导入方式
-from hoshino.typing import CQEvent
+# 使用nonebot原生的MessageSegment而不是从hoshino导入
+from nonebot.message import MessageSegment
 
 from .logger_helper import log_info, log_warning, log_error_msg
 from .dailysum import HTML_TEMPLATE
@@ -36,7 +33,9 @@ def get_font(size):
         'C:/Windows/Fonts/msyh.ttc',  # Windows微软雅黑
         'C:/Windows/Fonts/simhei.ttf',  # Windows黑体
         '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',  # Linux
-        '/System/Library/Fonts/PingFang.ttc'  # macOS
+        '/System/Library/Fonts/PingFang.ttc',  # macOS
+        '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',  # 文泉驿微米黑(常见于Linux)
+        '/usr/share/fonts/wqy-microhei/wqy-microhei.ttc'  # 另一种常见路径
     ]
     
     for font_path in font_paths:
@@ -206,7 +205,9 @@ async def handle_test_report(bot, ev):
     :return: None
     """
     try:
-        log_info(f"收到测试日报命令，群号:{ev['group_id']}, 用户:{ev['user_id']}")
+        group_id = ev.get('group_id', '未知群')
+        user_id = ev.get('user_id', '未知用户')
+        log_info(f"收到测试日报命令，群号:{group_id}, 用户:{user_id}")
         # 发送正在处理的提示
         await bot.send(ev, "正在生成测试日报图片，请稍候...")
         
@@ -250,4 +251,7 @@ async def handle_test_report(bot, ev):
     except Exception as e:
         log_error_msg(f"处理测试日报命令失败: {str(e)}")
         log_error_msg(traceback.format_exc())
-        await bot.send(ev, f"处理测试日报命令失败: {str(e)}") 
+        try:
+            await bot.send(ev, f"处理测试日报命令失败: {str(e)}")
+        except:
+            pass 

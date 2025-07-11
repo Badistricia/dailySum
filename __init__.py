@@ -5,10 +5,10 @@ from datetime import datetime
 from hoshino import Service, priv
 from .logger_helper import log_info, log_warning, log_error_msg
 from .dailysum import start_scheduler, manual_summary, backup_logs, load_group_config, handle_daily_report_cmd
-from .test_html_report import handle_test_report
+from .test_html_report import handle_test_report  # 重新导入handle_test_report函数
 
 sv = Service(
-    name='dailySum',
+    name='daily_summary',  # 修改Service名称，避免命名冲突
     bundle='日常',
     help_='''
     [日报] 手动触发当天群聊总结
@@ -37,6 +37,19 @@ log_info("创建logs目录成功")
 async def init_config():
     """初始化配置"""
     await load_group_config()
+
+# 在机器人启动时执行初始化和备份操作
+@sv.on_bot_connect
+async def on_startup():
+    log_info("机器人启动，执行初始化和备份操作...")
+    try:
+        # 初始化配置
+        await init_config()
+        # 执行日志备份
+        await backup_logs()
+        log_info("初始化备份完成")
+    except Exception as e:
+        log_error_msg(f"初始化或备份失败: {str(e)}")
 
 # 测试日报命令处理 - 专门处理"日报 测试"命令
 @sv.on_fullmatch('日报 测试')
@@ -88,23 +101,8 @@ async def yesterday_group_summary(bot, ev):
     log_info(f"收到指定群{day_str}日报命令，当前群号:{ev['group_id']}, 目标群号:{target_group_id}, 用户:{ev['user_id']}, 日期偏移:{day_offset}")
     await manual_summary(bot, ev, day_offset=day_offset, target_group=target_group_id)
 
-# 执行一次日志备份，确保历史记录保存
-async def run_initial_backup():
-    log_info("执行初始化日志备份...")
-    try:
-        await backup_logs()
-        log_info("初始化日志备份完成")
-    except Exception as e:
-        log_error_msg(f"初始化日志备份失败: {str(e)}")
-
-# 初始化配置
-asyncio.create_task(init_config())
-
 # 启动定时任务
 log_info("开始启动定时任务...")
 start_scheduler(sv)
-
-# 异步执行初始化备份
-asyncio.create_task(run_initial_backup())
 
 log_info("群聊日报插件初始化完成")
