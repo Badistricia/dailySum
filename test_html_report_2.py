@@ -72,14 +72,15 @@ HTML_TEMPLATE = """
         
         body {{
             background-color: #f7f7f7;
-            padding: 20px;
+            padding: 0;
+            margin: 0;
             color: #333;
             line-height: 1.6;
         }}
         
         .report-container {{
-            max-width: 800px;
-            margin: 0 auto;
+            width: 700px;
+            margin: 0;
             background-color: #ffffff;
             border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -357,8 +358,14 @@ async def html_to_screenshot(html_path, output_path):
             # 等待内容加载
             await page.wait_for_load_state("networkidle")
             
-            # 截图
-            await page.screenshot(path=output_path, full_page=True)
+            # 只截取报告容器部分，去掉周围的白边
+            container = await page.query_selector('.report-container')
+            if container:
+                await container.screenshot(path=output_path)
+                log_info("成功截取报告容器部分")
+            else:
+                # 如果找不到容器，则截取整个页面
+                await page.screenshot(path=output_path, full_page=True)
             
             await browser.close()
             
