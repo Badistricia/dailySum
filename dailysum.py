@@ -18,23 +18,38 @@ if sys.version_info < (3, 9):
     list = typing.List
     dict = typing.Dict
 
+# 导入HTML图片日报功能所需模块
+try:
+    from playwright.async_api import async_playwright
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+
 # import html2image # 暂时禁用图片功能
 from apscheduler.triggers.cron import CronTrigger
 from nonebot import scheduler
 from nonebot.message import MessageSegment
 
-from hoshino import Service, priv, logger, get_bot
+from hoshino import priv, logger, get_bot
 from .config import *
 from .logger_helper import log_debug, log_info, log_warning, log_error_msg, log_critical, logged
 
-# 不再创建服务实例，改为从__init__.py接收
-# sv = Service(
-#     name='群聊日报',
-#     use_priv=priv.ADMIN,  # 使用权限：管理员
-#     manage_priv=priv.ADMIN,  # 管理权限：管理员
-#     visible=True,  # 可见性：可见
-#     enable_on_default=False,  # 默认关闭
-# )
+# 导入HTML图片日报功能
+from .test_html_report_2 import (
+    html_to_image, 
+    generate_text_report,
+    init_playwright,
+    get_font_path
+)
+
+# 初始化Playwright（异步启动）
+async def init_dailysum_playwright():
+    if PLAYWRIGHT_AVAILABLE:
+        log_info("初始化Playwright...")
+        await init_playwright()
+        log_info("Playwright初始化完成")
+    else:
+        log_warning("Playwright未安装，将使用文本方式发送日报")
 
 # 确保data目录存在
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -43,40 +58,8 @@ os.makedirs(DATA_DIR, exist_ok=True)
 LOG_DIR = os.path.join(os.path.dirname(__file__), 'logs')
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# 日志解析正则表达式
-# 原始正则表达式
-# LOG_PATTERN = r'\[(.*?) nonebot\] INFO: Self: (.*?), Message (.*?) from (.*?)@\[群:(.*?)\]: \'(.*)\''
-# 适配run.log的新正则表达式，精确匹配提供的日志格式
 LOG_PATTERN = r'\[(.*?) nonebot\] INFO: Self: (.*?), Message (.*?) from (.*?)@\[群:(.*?)\]: \'(.*?)\'$'
 
-# HTML转图片工具初始化 - 暂时注释掉
-# try:
-#     log_info("初始化 HTML2Image...")
-#     chrome_paths = [
-#         '/usr/bin/chromium-browser',  # 标准路径
-#         '/snap/bin/chromium',         # snap安装路径
-#         '/usr/bin/chromium',          # 一些系统上的路径
-#         '/usr/bin/google-chrome',     # Google Chrome路径
-#         '/usr/bin/google-chrome-stable'
-#     ]
-#     
-#     chrome_path = None
-#     for path in chrome_paths:
-#         if os.path.exists(path):
-#             chrome_path = path
-#             log_info(f"找到Chrome/Chromium路径: {chrome_path}")
-#             break
-#     
-#     if chrome_path:
-#         hti = html2image.Html2Image(chrome_path=chrome_path)
-#         log_info(f"HTML2Image使用浏览器路径 {chrome_path} 初始化成功")
-#     else:
-#         hti = html2image.Html2Image()
-#         log_info("HTML2Image使用默认设置初始化成功")
-# except Exception as e:
-#     log_critical(f"HTML2Image 初始化失败: {str(e)}")
-#     log_critical(traceback.format_exc())
-#     hti = None
 
 # 创建HTML文本样式
 HTML_TEMPLATE = """
@@ -654,56 +637,39 @@ async def generate_image_summary(title, content, date_str):
     :param title: 标题
     :param content: 内容
     :param date_str: 日期字符串
-    :return: 图片数据（base64编码）
+    :return: 图片数据（base64编码）或None
     """
     log_info(f"开始生成图片摘要，日期: {date_str}")
     
-    # if not hti:
-    #     log_error_msg("HTML2Image未初始化，无法生成图片")
-    #     return None
-    
     try:
-        # 生成HTML内容
-        html_content = HTML_TEMPLATE.format(
-            title=title,
-            content=content,
-            date=date_str
-        )
-        
-        # 生成临时文件路径
-        temp_html_path = os.path.join(DATA_DIR, f"summary_{date_str}.html")
-        temp_png_path = os.path.join(DATA_DIR, f"summary_{date_str}.png")
-        
-        # 保存HTML到临时文件
-        with open(temp_html_path, 'w', encoding='utf-8') as f:
-            f.write(html_content)
-        
-        log_info(f"HTML内容已保存到临时文件: {temp_html_path}")
-        
-        # 生成图片
-        log_info("开始生成图片...")
-        # hti.screenshot(
-        #     html_file=temp_html_path,
-        #     save_as=temp_png_path,
-        #     size=(800, None)  # 宽度固定，高度自适应
-        # )
-        log_info(f"图片已生成: {temp_png_path}")
-        
-        # 读取图片并转换为base64
-        with open(temp_png_path, 'rb') as f:
-            image_data = f.read()
-        
-        log_info(f"图片大小: {len(image_data) / 1024:.2f} KB")
-        
-        # 清理临时文件
-        try:
-            # os.remove(temp_html_path)
-            os.remove(temp_png_path)
-            log_info("临时文件已清理")
-        except Exception as e:
-            log_warning(f"清理临时文件失败: {str(e)}")
-        
-        return image_data
+        # 尝试使用新版HTML转图片功能
+        if PLAYWRIGHT_AVAILABLE:
+            log_info("使用Playwright生成HTML图片日报...")
+            html_path, image_path = await html_to_image(title, content, date_str)
+            
+            if image_path and os.path.exists(image_path):
+                # 读取图片数据
+                with open(image_path, 'rb') as f:
+                    image_data = f.read()
+                
+                log_info(f"图片生成成功，大小: {len(image_data) / 1024:.2f} KB")
+                
+                # 清理临时文件
+                try:
+                    # 保留HTML文件，删除临时图片
+                    os.remove(image_path)
+                    log_info("临时图片文件已清理")
+                except Exception as e:
+                    log_warning(f"清理临时文件失败: {str(e)}")
+                
+                return image_data
+            else:
+                log_warning("HTML图片生成失败，尝试生成文本报告")
+                return None
+        else:
+            log_warning("Playwright未安装，无法生成HTML图片")
+            return None
+            
     except Exception as e:
         log_error_msg(f"生成图片摘要出错: {str(e)}")
         log_error_msg(traceback.format_exc())
@@ -778,13 +744,40 @@ async def execute_daily_summary(bot, target_groups=None, day_offset=0, start_hou
             
             # 发送日报
             try:
-                log_info(f"开始向群 {group_id} 发送文本摘要...")
-                message_to_send = f"【{date_str} 群聊日报】\n统计范围：{start_time.strftime('%m-%d %H:%M')} - {end_time.strftime('%m-%d %H:%M')}\n\n{summary}"
-                await bot.send_group_msg(
-                    group_id=int(group_id),
-                    message=message_to_send
-                )
-                log_info(f"成功向群 {group_id} 发送文本日报")
+                # 生成标题
+                title = f"{date_str} 群聊日报"
+                message_prefix = f"统计范围：{start_time.strftime('%m-%d %H:%M')} - {end_time.strftime('%m-%d %H:%M')}\n\n"
+                
+                # 尝试生成图片版本
+                image_data = None
+                if PLAYWRIGHT_AVAILABLE:
+                    log_info(f"为群 {group_id} 生成图片日报...")
+                    image_data = await generate_image_summary(title, summary, date_str)
+                
+                # 如果图片生成成功，则发送图片
+                if image_data:
+                    log_info(f"准备向群 {group_id} 发送图片日报...")
+                    # 发送前缀消息
+                    await bot.send_group_msg(
+                        group_id=int(group_id),
+                        message=f"【{date_str} 群聊日报】\n{message_prefix.rstrip()}"
+                    )
+                    # 转换为base64发送图片
+                    b64_str = base64.b64encode(image_data).decode()
+                    await bot.send_group_msg(
+                        group_id=int(group_id),
+                        message=MessageSegment.image(f'base64://{b64_str}')
+                    )
+                    log_info(f"成功向群 {group_id} 发送图片日报")
+                else:
+                    # 如果图片生成失败，发送文本版
+                    log_info(f"图片生成失败，向群 {group_id} 发送文本日报...")
+                    message_to_send = f"【{date_str} 群聊日报】\n{message_prefix}{summary}"
+                    await bot.send_group_msg(
+                        group_id=int(group_id),
+                        message=message_to_send
+                    )
+                    log_info(f"成功向群 {group_id} 发送文本日报")
                 return True
             except Exception as e:
                 log_error_msg(f"向群 {group_id} 发送日报出错: {str(e)}")
@@ -882,13 +875,33 @@ async def manual_summary(bot, ev, day_offset=0, target_group=None):
     
     # 发送到当前群（触发命令的群）
     try:
-        log_info(f"开始向群 {current_group_id} 发送文本摘要...")
-        message_to_send = f"【{date_str} {'群 '+target_group if target_group != current_group_id else '本群'}聊天日报】\n\n{summary}"
-        await bot.send_group_msg(
-            group_id=int(current_group_id),
-            message=message_to_send
-        )
-        log_info(f"成功发送群 {target_group} 的文本日报到群 {current_group_id}")
+        # 生成标题
+        title = f"{date_str} {'群 '+target_group if target_group != current_group_id else '本群'}聊天日报"
+        
+        # 尝试生成图片版本
+        image_data = None
+        if PLAYWRIGHT_AVAILABLE:
+            log_info(f"为群 {target_group} 生成图片日报...")
+            image_data = await generate_image_summary(title, summary, date_str)
+        
+        # 如果图片生成成功，则发送图片
+        if image_data:
+            log_info(f"准备向群 {current_group_id} 发送图片日报...")
+            # 发送前缀消息
+            await bot.send(ev, f"【{title}】")
+            # 转换为base64发送图片
+            b64_str = base64.b64encode(image_data).decode()
+            await bot.send(ev, MessageSegment.image(f'base64://{b64_str}'))
+            log_info(f"成功发送群 {target_group} 的图片日报到群 {current_group_id}")
+        else:
+            # 如果图片生成失败，发送文本版
+            log_info(f"图片生成失败，发送文本日报...")
+            message_to_send = f"【{title}】\n\n{summary}"
+            await bot.send_group_msg(
+                group_id=int(current_group_id),
+                message=message_to_send
+            )
+            log_info(f"成功发送群 {target_group} 的文本日报到群 {current_group_id}")
     except Exception as e:
         log_error_msg(f"发送群 {target_group} 日报到群 {current_group_id} 出错: {str(e)}")
         log_error_msg(traceback.format_exc())
@@ -967,17 +980,16 @@ async def handle_daily_report_cmd(bot, ev, msg):
         except Exception as e:
             log_error_msg(f"启用日报定时功能失败: {str(e)}")
             await bot.send(ev, '启用日报定时功能失败，请查看日志')
-            
+    
     elif msg.startswith(('禁用', '关闭')):
         # 禁用日报功能
         if not scheduler_running:
-            await bot.send(ev, '日报定时功能已经是关闭状态')
+            await bot.send(ev, '日报定时功能未在运行')
             return
             
         try:
-            # 移除日报相关的定时任务
-            scheduler.remove_job('dailysum_daily')
-            scheduler.remove_job('dailysum_log_backup')
+            # 移除定时任务
+            scheduler.remove_job('daily_summary')
             scheduler_running = False
             await bot.send(ev, '日报定时功能已禁用')
         except Exception as e:
@@ -985,134 +997,153 @@ async def handle_daily_report_cmd(bot, ev, msg):
             await bot.send(ev, '禁用日报定时功能失败，请查看日志')
     
     elif msg.startswith('状态'):
-        # 查看当前配置状态
-        try:
-            status = await get_daily_config_status()
-            await bot.send(ev, status)
-        except Exception as e:
-            log_error_msg(f"查看日报状态失败: {str(e)}")
-            await bot.send(ev, '查看日报状态失败，请查看日志')
+        # 查询日报状态
+        status_text = await get_daily_config_status()
+        await bot.send(ev, status_text)
     
-    elif msg.startswith('添加群'):
-        # 添加群到白名单
-        try:
-            parts = msg.split()
-            if len(parts) < 2 or not parts[1].isdigit():
-                await bot.send(ev, '参数错误，格式：日报 添加群 123456789')
-                return
-            
-            group_id = parts[1]
-            if group_id in DAILY_SUM_GROUPS:
-                await bot.send(ev, f'群 {group_id} 已在日报白名单中')
-                return
-            
-            DAILY_SUM_GROUPS.append(group_id)
-            # 保存配置
-            await save_group_config()
-            await bot.send(ev, f'已添加群 {group_id} 到日报白名单')
-        except Exception as e:
-            log_error_msg(f"添加群到白名单失败: {str(e)}")
-            await bot.send(ev, '添加失败，请查看日志')
+    elif msg.startswith('测试'):
+        # 手动触发日报生成
+        await manual_summary(bot, ev)
     
-    elif msg.startswith('删除群') or msg.startswith('移除群'):
-        # 从白名单移除群
-        try:
-            parts = msg.split()
-            if len(parts) < 2 or not parts[1].isdigit():
-                await bot.send(ev, '参数错误，格式：日报 删除群 123456789')
-                return
-            
-            group_id = parts[1]
-            if group_id not in DAILY_SUM_GROUPS:
-                await bot.send(ev, f'群 {group_id} 不在日报白名单中')
-                return
-            
-            DAILY_SUM_GROUPS.remove(group_id)
-            # 保存配置
-            await save_group_config()
-            await bot.send(ev, f'已从日报白名单移除群 {group_id}')
-        except Exception as e:
-            log_error_msg(f"从白名单移除群失败: {str(e)}")
-            await bot.send(ev, '移除失败，请查看日志')
-            
-    else:
-        # 查看日报
-        try:
-            if not msg:
-                # 没有参数，默认查看昨天的日报
-                day_offset = 1
-                target_group = None
+    elif msg.startswith('昨日'):
+        # 生成昨天的日报
+        await manual_summary(bot, ev, day_offset=1)
+    
+    elif msg.startswith('前日'):
+        # 生成前天的日报
+        await manual_summary(bot, ev, day_offset=2)
+        
+    elif msg.startswith(('指定', '查询')):
+        # 指定日期生成
+        # 格式: 指定 N 或 查询 N
+        parts = msg.split()
+        if len(parts) >= 2 and parts[1].isdigit():
+            day_offset = int(parts[1])
+            if day_offset <= 30:  # 限制最多查询30天前
+                await manual_summary(bot, ev, day_offset=day_offset)
             else:
-                parts = msg.split()
-                day_offset = 1  # 默认为昨天
-                target_group = None
-                
-                # 处理时间描述词
-                time_words = {
-                    '今天': 0,
-                    '昨天': 1,
-                    '前天': 2
-                }
-                
-                if len(parts) >= 1:
-                    # 处理第一个参数
-                    if parts[0] in time_words:
-                        # 时间描述词
-                        day_offset = time_words[parts[0]]
-                    elif parts[0].isdigit():
-                        if len(parts[0]) > 4:
-                            # 长数字，认为是群号
-                            target_group = parts[0]
-                        else:
-                            # 短数字，认为是天数
-                            day_offset = int(parts[0])
-                
-                # 处理第二个参数（如果有）
-                if len(parts) >= 2:
-                    # 第二个参数应该是群号
-                    if parts[1].isdigit():
-                        target_group = parts[1]
+                await bot.send(ev, '最多只能查询30天前的记录')
+        else:
+            await bot.send(ev, '日期格式有误，正确格式: 指定 N (N为天数)')
+    
+    elif msg.startswith('设置浏览器'):
+        # 设置自定义浏览器路径
+        parts = msg.split(maxsplit=1)
+        if len(parts) < 2:
+            await bot.send(ev, '请提供浏览器路径，格式: 设置浏览器 路径')
+            return
             
-            log_info(f"命令解析结果：日期偏移 = {day_offset}，目标群 = {target_group}")
-            await manual_summary(bot, ev, day_offset, target_group)
-        except ValueError:
-            await bot.send(ev, '参数格式错误。使用方法：\n日报 [天数/时间描述词] [群号] - 查看指定日报\n日报 状态 - 查看当前配置\n日报 添加群 123456789 - 添加群到白名单\n日报 删除群 123456789 - 从白名单删除群\n日报 启用/禁用 - 控制定时功能')
+        browser_path = parts[1].strip().strip('"').strip("'")
+        if not os.path.exists(browser_path):
+            await bot.send(ev, f'指定的浏览器路径不存在: {browser_path}')
+            return
+            
+        # 保存路径到配置文件
+        config_path = os.path.join(DATA_DIR, 'browser_config.json')
+        try:
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump({'browser_path': browser_path}, f, ensure_ascii=False, indent=2)
+            
+            # 重新加载配置
+            from .test_html_report_2 import load_browser_config
+            if load_browser_config():
+                await bot.send(ev, f'浏览器路径已设置: {browser_path}')
+            else:
+                await bot.send(ev, f'浏览器路径已保存，但加载失败，请检查路径是否正确')
         except Exception as e:
-            log_error_msg(f"查看日报失败: {str(e)}")
-            await bot.send(ev, '查看日报失败，请查看日志')
+            log_error_msg(f"保存浏览器配置失败: {str(e)}")
+            await bot.send(ev, f'保存浏览器配置失败: {str(e)}')
+    
+    elif msg.startswith('初始化playwright'):
+        # 手动初始化playwright
+        await bot.send(ev, '正在初始化Playwright，请稍候...')
+        try:
+            await init_dailysum_playwright()
+            await bot.send(ev, 'Playwright初始化完成')
+        except Exception as e:
+            log_error_msg(f"初始化Playwright失败: {str(e)}")
+            await bot.send(ev, f'初始化Playwright失败: {str(e)}')
+    
+    elif msg.startswith('帮助'):
+        # 显示帮助信息
+        help_text = """【群聊日报管理命令】
+- 启用/开启：启用日报功能
+- 禁用/关闭：禁用日报功能
+- 状态：查看日报配置状态
+- 测试：手动生成今日日报
+- 昨日：生成昨天的日报
+- 前日：生成前天的日报
+- 指定 N：生成N天前的日报
+- 设置浏览器 路径：设置自定义浏览器路径
+- 初始化playwright：手动初始化Playwright
+- 帮助：显示本帮助信息"""
+        await bot.send(ev, help_text)
+        
+    else:
+        # 未知命令
+        await bot.send(ev, '未知的日报命令，请发送 日报 帮助 查看可用命令')
 
 # 修改启动定时任务函数，不再需要sv参数
 def start_scheduler(sv=None):
     """
     启动定时任务
-    :param sv: 服务实例，不再使用
+    :param sv: 服务实例，用于添加事件监听，可为None
     """
-    if not ENABLE_SCHEDULER:
-        log_info("定时任务已禁用，不启动定时器")
+    global scheduler_running
+    
+    if scheduler_running:
+        log_warning("日报定时器已经在运行中")
         return
     
-    log_info("开始启动群聊日报定时任务")
+    log_info("启动日报定时器...")
     
-    bot = get_bot()
+    # 初始化Playwright
+    loop = asyncio.get_event_loop()
+    loop.create_task(init_dailysum_playwright())
     
-    # 每天定时发送日报
-    scheduler.add_job(
-        execute_daily_summary,
-        CronTrigger(hour=SUMMARY_HOUR, minute=SUMMARY_MINUTE),
-        args=(bot, None, 0, SUMMARY_START_HOUR),  # bot, target_groups=None, day_offset=0, start_hour=4
-        id='dailysum_daily'
+    # 设置日报发送定时任务
+    if ENABLE_SCHEDULER:
+        @scheduler.scheduled_job(
+            'cron',
+            hour=SUMMARY_HOUR,
+            minute=SUMMARY_MINUTE,
+            id='daily_summary'
+        )
+        async def daily_summary_job():
+            """定时发送日报"""
+            try:
+                bot = get_bot()
+                log_info("开始执行日报定时任务...")
+                await execute_daily_summary(bot, start_hour=SUMMARY_START_HOUR)
+                log_info("日报定时任务执行完毕")
+            except Exception as e:
+                log_error_msg(f"日报定时任务执行出错: {str(e)}")
+                log_error_msg(traceback.format_exc())
+        
+        log_info(f"已设置日报发送定时任务，将在每天{SUMMARY_HOUR:02d}:{SUMMARY_MINUTE:02d}发送")
+    else:
+        log_warning("日报定时功能已禁用")
+    
+    # 设置日志备份定时任务
+    @scheduler.scheduled_job(
+        'cron',
+        hour=23,
+        minute=59,
+        id='backup_logs'
     )
-    log_info(f"已添加每日 {SUMMARY_HOUR:02d}:{SUMMARY_MINUTE:02d} 的日报定时任务")
+    async def backup_logs_job():
+        """备份日志"""
+        try:
+            log_info("开始备份日志...")
+            await backup_logs()
+            log_info("日志备份完成")
+        except Exception as e:
+            log_error_msg(f"日志备份任务出错: {str(e)}")
+            log_error_msg(traceback.format_exc())
     
-    # 添加日志备份定时任务，每天23:59执行
-    scheduler.add_job(
-        backup_logs,
-        CronTrigger(hour=23, minute=59),
-        id='dailysum_log_backup'
-    )
-    log_info("已添加23:59的日志备份定时任务")
+    log_info("已设置日志备份定时任务，将在每天23:59执行")
     
-    log_info('群聊日报定时任务启动完成')
+    scheduler_running = True
 
 # 保存群配置
 @logged
