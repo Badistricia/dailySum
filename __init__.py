@@ -5,6 +5,7 @@ from datetime import datetime
 from hoshino import Service, priv
 from .logger_helper import log_info, log_warning, log_error_msg
 from .dailysum import start_scheduler, manual_summary, backup_logs, load_group_config, handle_daily_report_cmd
+from .test_html_report import handle_test_report
 
 sv = Service(
     name='dailySum',
@@ -18,7 +19,9 @@ sv = Service(
     [日报 添加群 群号] 添加群到日报白名单
     [日报 删除群 群号] 从日报白名单移除群
     [日报 启用/禁用] 开启或关闭日报定时功能
-    '''.strip()
+    [日报 测试] 生成一个HTML格式的测试日报
+    '''.strip(),
+    enable_on_default=False
 )
 
 # 创建目录
@@ -40,6 +43,14 @@ async def init_config():
 async def daily_report_cmd(bot, ev):
     msg = ev.message.extract_plain_text().strip()
     log_info(f"收到日报命令，群号:{ev['group_id']}, 用户:{ev['user_id']}, 参数:{msg}")
+    
+    # 处理测试命令
+    if msg == '测试':
+        log_info(f"收到测试日报命令，群号:{ev['group_id']}, 用户:{ev['user_id']}")
+        await handle_test_report(bot, ev)
+        return
+    
+    # 处理其他日报命令
     await handle_daily_report_cmd(bot, ev, msg)
 
 # 原有的处理函数，保留以兼容已发送的命令
