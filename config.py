@@ -19,7 +19,7 @@ SUMMARY_START_HOUR = 4  # 统计时间段的起始小时（例如：4点到次�
 
 # AI配置
 AI_API_KEY = "sk-476330950dd24ff6869b6a301930f275"  # DeepSeek API密钥
-AI_MODEL = "deepseek-reasoner"  # AI模型名称
+AI_MODEL = "deepseek-chat"  # AI模型名称
 AI_TEMPERATURE = 1.0  # AI生成温度
 
 # 群配置
