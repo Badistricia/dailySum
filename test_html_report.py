@@ -41,14 +41,17 @@ def get_font(size):
     for font_path in font_paths:
         try:
             if os.path.exists(font_path):
+                log_info(f"找到字体文件: {font_path}")
                 return ImageFont.truetype(font_path, size)
         except Exception as e:
             log_warning(f"加载字体 {font_path} 失败: {str(e)}")
     
     # 如果所有字体都失败，使用默认字体
     try:
+        log_info("使用默认字体")
         return ImageFont.truetype(ImageFont.load_default().path, size)
     except:
+        log_info("加载默认字体")
         return ImageFont.load_default()
 
 async def text_to_image(title, content, date_str):
@@ -60,6 +63,8 @@ async def text_to_image(title, content, date_str):
     :return: 图片对象
     """
     try:
+        log_info("开始将文本转换为图片...")
+        
         # 获取字体
         font = get_font(FONT_SIZE)
         title_font = get_font(TITLE_FONT_SIZE)
@@ -70,11 +75,32 @@ async def text_to_image(title, content, date_str):
         # 计算每行文字宽度
         max_width = 0
         for line in lines:
-            width = font.getmask(line).getbbox()[2] if hasattr(font, 'getmask') else len(line) * FONT_SIZE
-            max_width = max(max_width, width)
+            try:
+                if hasattr(font, 'getbbox'):
+                    bbox = font.getbbox(line)
+                    width = bbox[2] - bbox[0]
+                elif hasattr(font, 'getmask'):
+                    width = font.getmask(line).getbbox()[2]
+                else:
+                    width = len(line) * FONT_SIZE
+                max_width = max(max_width, width)
+            except Exception as e:
+                log_warning(f"计算文字宽度出错: {str(e)}")
+                width = len(line) * FONT_SIZE
+                max_width = max(max_width, width)
         
         # 计算标题宽度
-        title_width = title_font.getmask(title).getbbox()[2] if hasattr(title_font, 'getmask') else len(title) * TITLE_FONT_SIZE
+        try:
+            if hasattr(title_font, 'getbbox'):
+                bbox = title_font.getbbox(title)
+                title_width = bbox[2] - bbox[0]
+            elif hasattr(title_font, 'getmask'):
+                title_width = title_font.getmask(title).getbbox()[2]
+            else:
+                title_width = len(title) * TITLE_FONT_SIZE
+        except Exception as e:
+            log_warning(f"计算标题宽度出错: {str(e)}")
+            title_width = len(title) * TITLE_FONT_SIZE
         
         # 设置图片宽度，包含边距
         width = max(max_width, title_width) + PADDING * 2
@@ -85,6 +111,8 @@ async def text_to_image(title, content, date_str):
         height += TITLE_FONT_SIZE  # 标题高度
         height += (FONT_SIZE + LINE_SPACING) * len(lines)  # 内容行高度
         height += 30  # 底部日期所需空间
+        
+        log_info(f"创建图片，宽: {width}，高: {height}")
         
         # 创建图片
         image = Image.new('RGB', (width, height), BG_COLOR)
@@ -116,11 +144,11 @@ async def text_to_image(title, content, date_str):
 
 async def html_to_image(title, content, date_str):
     """
-    将HTML转换为图片 - 这个只是保存HTML文件，不实际转换，仅用于调试
+    将HTML转换为图片 - 使用PIL库实现
     :param title: 标题
     :param content: 内容
     :param date_str: 日期字符串
-    :return: HTML文件路径
+    :return: HTML文件路径和图片路径
     """
     try:
         # 生成HTML内容
@@ -147,57 +175,6 @@ async def html_to_image(title, content, date_str):
         log_error_msg(f"HTML转图片失败: {str(e)}")
         log_error_msg(traceback.format_exc())
         return None, None
-
-# 创建测试用的假数据
-async def create_test_data():
-    """创建测试用的假数据"""
-    test_data = {
-        "12345678": [  # 示例群号
-            {
-                "time": "2023-12-01 08:15:30",
-                "qq": "10001",
-                "content": "早上好啊，今天天气不错！"
-            },
-            {
-                "time": "2023-12-01 08:16:45",
-                "qq": "10002",
-                "content": "确实，阳光明媚的！今天有人去公园吗？"
-            },
-            {
-                "time": "2023-12-01 08:20:10",
-                "qq": "10003",
-                "content": "我想去，但是我还有工作要做..."
-            },
-            {
-                "time": "2023-12-01 09:05:22",
-                "qq": "10001",
-                "content": "周末再一起去吧，今天确实有点忙。"
-            },
-            {
-                "time": "2023-12-01 12:30:15",
-                "qq": "10002",
-                "content": "中午吃什么好呢？"
-            },
-            {
-                "time": "2023-12-01 12:32:40",
-                "qq": "10003",
-                "content": "我准备点外卖，有人一起吗？"
-            },
-            {
-                "time": "2023-12-01 17:45:30",
-                "qq": "10001",
-                "content": "今天工作终于结束了，好累啊！"
-            }
-        ]
-    }
-    
-    # 保存测试数据到文件
-    test_data_path = os.path.join(DATA_DIR, "test_data.json")
-    with open(test_data_path, 'w', encoding='utf-8') as f:
-        json.dump(test_data, f, ensure_ascii=False, indent=2)
-    
-    log_info(f"测试数据已保存到: {test_data_path}")
-    return test_data
 
 # 测试日报摘要文本
 TEST_SUMMARY = """【聊天活跃度】
@@ -228,47 +205,48 @@ async def handle_test_report(bot, ev):
     :return: None
     """
     try:
+        log_info(f"收到测试日报命令，群号:{ev['group_id']}, 用户:{ev['user_id']}")
+        # 发送正在处理的提示
+        await bot.send(ev, "正在生成测试日报图片，请稍候...")
+        
         # 获取当前日期
         today = datetime.now().strftime('%Y-%m-%d')
         
-        # 创建测试数据
-        await create_test_data()
-        
-        # 生成HTML和图片
-        title = f"{today} 群聊日报"
+        # 使用预设的摘要文本
+        title = f"{today} 群聊日报测试"
         content = TEST_SUMMARY
+        
+        log_info(f"使用预设摘要生成图片，标题: {title}")
         
         # 尝试转换为图片
         html_path, image_path = await html_to_image(title, content, today)
         
         if image_path and os.path.exists(image_path):
             # 发送图片
-            await bot.send(ev, MessageSegment.image(f'file:///{image_path}'))
-            log_info("测试日报图片已发送")
+            log_info(f"准备发送图片: {image_path}")
+            try:
+                await bot.send(ev, MessageSegment.image(f'file:///{image_path}'))
+                log_info("测试日报图片已发送")
+            except Exception as e:
+                log_error_msg(f"发送图片失败: {str(e)}")
+                log_error_msg(traceback.format_exc())
+                # 如果发送失败，尝试使用base64格式
+                try:
+                    with open(image_path, 'rb') as f:
+                        img_bytes = f.read()
+                    b64_str = base64.b64encode(img_bytes).decode()
+                    await bot.send(ev, MessageSegment.image(f'base64://{b64_str}'))
+                    log_info("使用base64格式发送图片成功")
+                except Exception as e2:
+                    log_error_msg(f"使用base64发送图片失败: {str(e2)}")
+                    # 最终失败，发送文本
+                    await bot.send(ev, f"【测试日报 - 图片发送失败】\n{title}\n\n{content}")
         else:
             # 如果图片生成失败，发送文本
+            log_warning("测试日报图片生成失败，发送文本版本")
             await bot.send(ev, f"【测试日报 - 图片生成失败】\n{title}\n\n{content}")
-            log_warning("测试日报图片生成失败，已发送文本版本")
             
     except Exception as e:
         log_error_msg(f"处理测试日报命令失败: {str(e)}")
         log_error_msg(traceback.format_exc())
-        await bot.send(ev, f"处理测试日报命令失败: {str(e)}")
-
-# 测试用的主函数
-if __name__ == "__main__":
-    # 创建测试数据
-    asyncio.run(create_test_data())
-    
-    # 测试图片生成
-    today = datetime.now().strftime('%Y-%m-%d')
-    title = f"{today} 群聊日报"
-    content = TEST_SUMMARY
-    
-    # 生成HTML和图片
-    html_path, image_path = asyncio.run(html_to_image(title, content, today))
-    
-    if image_path:
-        print(f"测试成功，图片已保存到: {image_path}")
-    else:
-        print("测试失败，未能生成图片") 
+        await bot.send(ev, f"处理测试日报命令失败: {str(e)}") 

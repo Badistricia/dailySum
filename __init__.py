@@ -38,16 +38,20 @@ async def init_config():
     """初始化配置"""
     await load_group_config()
 
-# 统一处理所有日报命令
+# 测试日报命令处理 - 专门处理"日报 测试"命令
+@sv.on_fullmatch('日报 测试')
+async def test_daily_report_cmd(bot, ev):
+    log_info(f"收到测试日报命令，群号:{ev['group_id']}, 用户:{ev['user_id']}")
+    await handle_test_report(bot, ev)
+
+# 统一处理其他日报命令
 @sv.on_prefix(['日报'])
 async def daily_report_cmd(bot, ev):
     msg = ev.message.extract_plain_text().strip()
     log_info(f"收到日报命令，群号:{ev['group_id']}, 用户:{ev['user_id']}, 参数:{msg}")
     
-    # 处理测试命令
+    # 测试命令已由上面的专用处理函数处理，这里跳过
     if msg == '测试':
-        log_info(f"收到测试日报命令，群号:{ev['group_id']}, 用户:{ev['user_id']}")
-        await handle_test_report(bot, ev)
         return
     
     # 处理其他日报命令
