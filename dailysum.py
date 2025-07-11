@@ -39,29 +39,15 @@ from .test_html_report_2 import (
     html_to_image, 
     generate_text_report,
     init_playwright,
-    get_font_path
+    get_font_path,
+    preprocess_content
 )
-
-# 导入新版AI-HTML直接生成功能
-try:
-    from .test_html_report_3 import (
-        generate_html_report,
-        html_to_screenshot,
-        init_playwright as init_playwright_3
-    )
-    HTML3_AVAILABLE = True
-    log_info("AI-HTML直接生成功能加载成功")
-except ImportError as e:
-    HTML3_AVAILABLE = False
-    log_warning(f"AI-HTML直接生成功能加载失败: {str(e)}")
 
 # 初始化Playwright（异步启动）
 async def init_dailysum_playwright():
     if PLAYWRIGHT_AVAILABLE:
         log_info("初始化Playwright...")
         await init_playwright()
-        if HTML3_AVAILABLE:
-            await init_playwright_3()
         log_info("Playwright初始化完成")
     else:
         log_warning("Playwright未安装，将使用文本方式发送日报")
@@ -657,25 +643,9 @@ async def generate_image_summary(title, content, date_str):
     log_info(f"开始生成图片摘要，日期: {date_str}")
     
     try:
-        # 尝试使用AI-HTML直接生成功能
-        if PLAYWRIGHT_AVAILABLE and HTML3_AVAILABLE:
-            log_info("使用AI-HTML直接生成日报...")
-            group_id = "当前群"  # 由于只是用于显示，可以使用固定值
-            html_path, image_path = await generate_html_report(group_id, title, date_str, test_mode=False, summary_content=content)
-            
-            if image_path and os.path.exists(image_path):
-                # 读取图片数据
-                with open(image_path, 'rb') as f:
-                    image_data = f.read()
-                
-                log_info(f"AI-HTML图片生成成功，大小: {len(image_data) / 1024:.2f} KB")
-                return image_data
-            else:
-                log_warning("AI-HTML图片生成失败，尝试使用旧版HTML转图片功能")
-        
-        # 如果AI-HTML方式失败，尝试使用旧版HTML转图片功能
+        # 优先使用传统HTML转图片功能
         if PLAYWRIGHT_AVAILABLE:
-            log_info("使用旧版HTML转图片功能...")
+            log_info("使用HTML转图片功能生成日报...")
             html_path, image_path = await html_to_image(title, content, date_str)
             
             if image_path and os.path.exists(image_path):
@@ -786,22 +756,9 @@ async def execute_daily_summary(bot, target_groups=None, day_offset=0, start_hou
                 # 尝试生成图片版本
                 image_data = None
                 
-                # 先尝试使用AI-HTML直接生成功能
-                if PLAYWRIGHT_AVAILABLE and HTML3_AVAILABLE:
-                    log_info(f"使用AI-HTML直接生成群 {group_id} 的日报...")
-                    html_path, image_path = await generate_html_report(group_id, title, date_str, test_mode=False, summary_content=summary)
-                    
-                    if image_path and os.path.exists(image_path):
-                        # 读取图片数据
-                        with open(image_path, 'rb') as f:
-                            image_data = f.read()
-                        log_info(f"AI-HTML图片生成成功，大小: {len(image_data) / 1024:.2f} KB")
-                    else:
-                        log_warning(f"AI-HTML图片生成失败，尝试使用传统方式")
-                
-                # 如果AI-HTML失败，使用传统方式
-                if image_data is None and PLAYWRIGHT_AVAILABLE:
-                    log_info(f"为群 {group_id} 生成传统HTML图片日报...")
+                # 使用传统HTML转图片功能
+                if PLAYWRIGHT_AVAILABLE:
+                    log_info(f"使用传统HTML转图片功能生成日报...")
                     image_data = await generate_image_summary(title, summary, date_str)
                 
                 # 如果图片生成成功，则发送图片
@@ -935,22 +892,9 @@ async def manual_summary(bot, ev, day_offset=0, target_group=None):
         # 尝试生成图片版本
         image_data = None
         
-        # 先尝试使用AI-HTML直接生成功能
-        if PLAYWRIGHT_AVAILABLE and HTML3_AVAILABLE:
-            log_info(f"使用AI-HTML直接生成群 {target_group} 的日报...")
-            html_path, image_path = await generate_html_report(target_group, title, date_str, test_mode=False, summary_content=summary)
-            
-            if image_path and os.path.exists(image_path):
-                # 读取图片数据
-                with open(image_path, 'rb') as f:
-                    image_data = f.read()
-                log_info(f"AI-HTML图片生成成功，大小: {len(image_data) / 1024:.2f} KB")
-            else:
-                log_warning(f"AI-HTML图片生成失败，尝试使用传统方式")
-        
-        # 如果AI-HTML失败，尝试使用传统方式
-        if image_data is None and PLAYWRIGHT_AVAILABLE:
-            log_info(f"尝试使用传统方式生成图片日报...")
+        # 使用传统HTML转图片功能
+        if PLAYWRIGHT_AVAILABLE:
+            log_info(f"使用传统HTML转图片功能生成日报...")
             image_data = await generate_image_summary(title, summary, date_str)
         
         # 如果图片生成成功，则发送图片

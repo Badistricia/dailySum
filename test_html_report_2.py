@@ -171,34 +171,26 @@ HTML_TEMPLATE = """
         <div class="bento-grid">
             <div class="bento-item bento-item-large">
                 <div class="bento-item-title">
-                    <div class="bento-item-icon">📊</div>
-                    聊天活跃度
-                </div>
-                <div class="bento-item-content" id="activity-content"></div>
-            </div>
-            
-            <div class="bento-item">
-                <div class="bento-item-title">
-                    <div class="bento-item-icon">💬</div>
-                    话题分析
+                    <div class="bento-item-icon">🔥</div>
+                    今日热点话题
                 </div>
                 <div class="bento-item-content" id="topics-content"></div>
             </div>
             
             <div class="bento-item">
                 <div class="bento-item-title">
-                    <div class="bento-item-icon">😊</div>
-                    情感分析
+                    <div class="bento-item-icon">📢</div>
+                    重要消息
                 </div>
-                <div class="bento-item-content" id="sentiment-content"></div>
+                <div class="bento-item-content" id="important-content"></div>
             </div>
             
             <div class="bento-item">
                 <div class="bento-item-title">
-                    <div class="bento-item-icon">🌟</div>
-                    互动亮点
+                    <div class="bento-item-icon">💬</div>
+                    金句
                 </div>
-                <div class="bento-item-content" id="interaction-content"></div>
+                <div class="bento-item-content" id="quotes-content"></div>
             </div>
             
             <div class="bento-item bento-item-large">
@@ -242,86 +234,112 @@ HTML_TEMPLATE = """
             }});
             
             // 如果没有找到任何标题部分，则尝试按不同格式再解析一遍
-            if (Object.keys(sections).length === 0) {
+            if (Object.keys(sections).length === 0) {{
                 // 处理整段式的内容，按照明显的分隔来处理
                 let allContent = content.split('\\n');
                 let fullText = allContent.join('\\n');
                 
                 // 尝试查找标题模式
-                let activityMatch = fullText.match(/活跃度[\s\S]*?(?=话题分析|情感分析|互动亮点|总结|$)/i);
-                let topicsMatch = fullText.match(/话题分析[\s\S]*?(?=情感分析|互动亮点|总结|$)/i);
-                let sentimentMatch = fullText.match(/情感分析[\s\S]*?(?=互动亮点|总结|$)/i);
-                let interactionMatch = fullText.match(/互动亮点[\s\S]*?(?=总结|$)/i);
-                let summaryMatch = fullText.match(/总结[\s\S]*/i);
+                let matches = fullText.match(/今日热点话题[：:]([\s\S]*?)(?=重要消息[：:]|金句[：:]|总结[：:]|$)/i);
+                if (matches) sections["今日热点话题"] = [matches[1].trim()];
                 
-                if (activityMatch) sections["聊天活跃度"] = [activityMatch[0].replace(/活跃度[：:]\s*/i, '')];
-                if (topicsMatch) sections["话题分析"] = [topicsMatch[0].replace(/话题分析[：:]\s*/i, '')];
-                if (sentimentMatch) sections["情感分析"] = [sentimentMatch[0].replace(/情感分析[：:]\s*/i, '')];
-                if (interactionMatch) sections["互动亮点"] = [interactionMatch[0].replace(/互动亮点[：:]\s*/i, '')];
-                if (summaryMatch) sections["总结"] = [summaryMatch[0].replace(/总结[：:]\s*/i, '')];
-            }
-            
-            // 填充内容到对应区块
-            if (sections['聊天活跃度'] || sections['活跃度']) {
-                let activityContent = sections['聊天活跃度'] || sections['活跃度'];
-                document.getElementById('activity-content').innerHTML = activityContent.join('<br>');
-            } else {
-                document.getElementById('activity-content').innerHTML = '<p>今日无聊天数据</p>';
-            }
-            
-            if (sections['话题分析']) {
-                let topicsHtml = '';
-                const topics = sections['话题分析'];
+                matches = fullText.match(/重要消息[：:]([\s\S]*?)(?=金句[：:]|总结[：:]|$)/i);
+                if (matches) sections["重要消息"] = [matches[1].trim()];
                 
-                // 构造话题HTML，特别处理列表项
-                let hasListItems = false;
-                topicsHtml = '<ul>';
+                matches = fullText.match(/金句[：:]([\s\S]*?)(?=总结[：:]|$)/i);
+                if (matches) sections["金句"] = [matches[1].trim()];
                 
-                for (let i = 0; i < topics.length; i++) {
-                    let line = topics[i];
-                    // 处理以"-"开头的列表项
-                    if (line.trim().startsWith('-')) {
-                        hasListItems = true;
-                        const topic = line.trim().substring(1).trim();
-                        topicsHtml += `<li>${topic}</li>`;
-                    } else if (!hasListItems) {
-                        // 非列表项且还没有列表项，作为描述添加
-                        topicsHtml = `<p>${line}</p>` + topicsHtml;
-                    }
-                }
-                topicsHtml += '</ul>';
+                matches = fullText.match(/总结[：:]([\s\S]*)/i);
+                if (matches) sections["总结"] = [matches[1].trim()];
                 
-                // 如果没有列表项，显示整段文本
-                if (!hasListItems) {
-                    topicsHtml = topics.join('<br>');
-                }
+                // 如果仍然没有找到任何标题，把整个内容作为摘要
+                if (Object.keys(sections).length === 0) {{
+                    sections["聊天摘要"] = [content];
+                }}
+            }}
+            
+            // 映射标题到HTML元素ID
+            const mappings = {{
+                '今日热点话题': 'topics-content',
+                '热点话题': 'topics-content',
+                '今日话题': 'topics-content',
+                '重要消息': 'important-content',
+                '金句': 'quotes-content',
+                '总结': 'summary-content',
+                '今日总结': 'summary-content',
+                '聊天摘要': 'topics-content',
+                '聊天活跃度': 'topics-content',
+                '话题分析': 'topics-content',
+                '情感分析': 'important-content',
+                '互动亮点': 'quotes-content'
+            }};
+            
+            // 填充各区块内容
+            Object.entries(sections).forEach(([section, lines]) => {{
+                const elementId = mappings[section] || 'topics-content';  // 默认放到话题区块
+                let element = document.getElementById(elementId);
                 
-                document.getElementById('topics-content').innerHTML = topicsHtml;
-            } else {
-                document.getElementById('topics-content').innerHTML = '<p>无特定话题</p>';
-            }
-            
-            if (sections['情感分析']) {
-                document.getElementById('sentiment-content').innerHTML = sections['情感分析'].join('<br>');
-            } else {
-                document.getElementById('sentiment-content').innerHTML = '<p>无情感分析数据</p>';
-            }
-            
-            if (sections['互动亮点']) {
-                document.getElementById('interaction-content').innerHTML = sections['互动亮点'].join('<br>');
-            } else {
-                document.getElementById('interaction-content').innerHTML = '<p>今日无特别互动</p>';
-            }
-            
-            if (sections['总结']) {
-                document.getElementById('summary-content').innerHTML = `<span class="highlight">${sections['总结'].join('<br>')}</span>`;
-            } else {
-                document.getElementById('summary-content').innerHTML = '<p>今日聊天较少，无需总结</p>';
-            }
+                if (element) {{
+                    // 格式化内容为HTML
+                    let htmlContent = lines.join('\\n');
+                    
+                    // 处理列表
+                    // 将"1. "或"- "或"* "格式的行转换为HTML列表
+                    htmlContent = htmlContent.split('\\n').map(line => {{
+                        let trimmedLine = line.trim();
+                        if (trimmedLine.match(/^\d+\.\s/)) {{
+                            return '<li>' + trimmedLine.replace(/^\d+\.\s/, '') + '</li>';
+                        }} else if (trimmedLine.startsWith('- ')) {{
+                            return '<li>' + trimmedLine.substring(2) + '</li>';
+                        }} else if (trimmedLine.startsWith('* ')) {{
+                            return '<li>' + trimmedLine.substring(2) + '</li>';
+                        }} else if (trimmedLine.startsWith('• ')) {{
+                            return '<li>' + trimmedLine.substring(2) + '</li>';
+                        }} else {{
+                            return line;
+                        }}
+                    }}).join('\\n');
+                    
+                    // 将连续的<li>标签包装在<ul>中
+                    let inList = false;
+                    htmlContent = htmlContent.split('\\n').map(line => {{
+                        if (line.trim().startsWith('<li>')) {{
+                            if (!inList) {{
+                                inList = true;
+                                return '<ul>' + line;
+                            }}
+                            return line;
+                        }} else {{
+                            if (inList) {{
+                                inList = false;
+                                return '</ul>' + line;
+                            }}
+                            return line;
+                        }}
+                    }}).join('\\n');
+                    
+                    // 确保最后一个列表被正确关闭
+                    if (inList) {{
+                        htmlContent += '</ul>';
+                    }}
+                    
+                    // 处理段落，使内容更易读
+                    htmlContent = htmlContent.replace(/\\n{2,}/g, '</p><p>');
+                    htmlContent = '<p>' + htmlContent + '</p>';
+                    htmlContent = htmlContent.replace(/<p>\\s*<\/p>/g, '');
+                    
+                    // 高亮关键词（在总结部分）
+                    if (elementId === 'summary-content') {{
+                        htmlContent = htmlContent.replace(/(重要|关键|值得注意|热点|关注)/g, '<span class="highlight">$1</span>');
+                    }}
+                    
+                    element.innerHTML = htmlContent;
+                }}
+            }});
         }}
         
-        // 页面加载完成后执行
-        document.addEventListener('DOMContentLoaded', fillContent);
+        // 页面加载后执行填充
+        window.onload = fillContent;
     </script>
 </body>
 </html>
@@ -646,29 +664,24 @@ def preprocess_content(content):
     :return: 处理后的内容
     """
     # 如果内容没有明确的【】分段，尝试进行格式化
-    if "【聊天活跃度】" not in content and "【活跃度】" not in content:
+    if "【今日热点话题】" not in content and "【热点话题】" not in content and "【今日话题】" not in content:
         # 尝试从内容中提取各部分
         processed = ""
         
-        # 提取聊天活跃度
-        activity_match = re.search(r'活跃度[：:]?([\s\S]*?)(?=话题分析|情感分析|互动亮点|总结|$)', content, re.IGNORECASE)
+        # 提取聊天活跃度/热点话题
+        activity_match = re.search(r'(活跃度|热点话题|今日话题)[：:]?([\s\S]*?)(?=重要消息|金句|总结|$)', content, re.IGNORECASE)
         if activity_match:
-            processed += "【聊天活跃度】\n" + activity_match.group(1).strip() + "\n\n"
+            processed += "【今日热点话题】\n" + activity_match.group(2).strip() + "\n\n"
         
-        # 提取话题分析
-        topics_match = re.search(r'话题分析[：:]?([\s\S]*?)(?=情感分析|互动亮点|总结|$)', content, re.IGNORECASE)
+        # 提取重要消息
+        topics_match = re.search(r'重要消息[：:]?([\s\S]*?)(?=金句|总结|$)', content, re.IGNORECASE)
         if topics_match:
-            processed += "【话题分析】\n" + topics_match.group(1).strip() + "\n\n"
+            processed += "【重要消息】\n" + topics_match.group(1).strip() + "\n\n"
         
-        # 提取情感分析
-        sentiment_match = re.search(r'情感分析[：:]?([\s\S]*?)(?=互动亮点|总结|$)', content, re.IGNORECASE)
+        # 提取金句
+        sentiment_match = re.search(r'金句[：:]?([\s\S]*?)(?=总结|$)', content, re.IGNORECASE)
         if sentiment_match:
-            processed += "【情感分析】\n" + sentiment_match.group(1).strip() + "\n\n"
-        
-        # 提取互动亮点
-        interaction_match = re.search(r'互动亮点[：:]?([\s\S]*?)(?=总结|$)', content, re.IGNORECASE)
-        if interaction_match:
-            processed += "【互动亮点】\n" + interaction_match.group(1).strip() + "\n\n"
+            processed += "【金句】\n" + sentiment_match.group(1).strip() + "\n\n"
         
         # 提取总结
         summary_match = re.search(r'总结[：:]?([\s\S]*)', content, re.IGNORECASE)
@@ -697,12 +710,11 @@ def preprocess_content(content):
             if current_chunk:
                 chunks.append('\n'.join(current_chunk))
             
-            if len(chunks) >= 5:  # 尝试匹配我们的5个部分
-                processed = "【聊天活跃度】\n" + chunks[0] + "\n\n"
-                processed += "【话题分析】\n" + chunks[1] + "\n\n"
-                processed += "【情感分析】\n" + chunks[2] + "\n\n"
-                processed += "【互动亮点】\n" + chunks[3] + "\n\n"
-                processed += "【总结】\n" + '\n'.join(chunks[4:]) + "\n\n"
+            if len(chunks) >= 4:  # 尝试匹配我们的4个部分
+                processed = "【今日热点话题】\n" + chunks[0] + "\n\n"
+                processed += "【重要消息】\n" + chunks[1] + "\n\n"
+                processed += "【金句】\n" + chunks[2] + "\n\n"
+                processed += "【总结】\n" + '\n'.join(chunks[3:]) + "\n\n"
             else:
                 # 最后的fallback：把所有内容放到一起
                 processed = "【聊天摘要】\n" + content
@@ -711,25 +723,25 @@ def preprocess_content(content):
     return content
 
 # 测试日报摘要文本
-TEST_SUMMARY = """【聊天活跃度】
-今日共有3位成员参与聊天，总消息量为7条。
-最活跃的时段是上午8点到9点，共有4条消息。
+TEST_SUMMARY = """【今日热点话题】
+1. 用户讨论了最新的软件更新和功能改进
+2. 关于周末团建活动的地点选择讨论
+3. 新项目进度和技术选型讨论
+4. 分享了几个有趣的技术文章和视频
+5. 讨论了最新的行业动态和市场变化
 
-【话题分析】
-今日主要讨论了以下话题：
-- 天气和户外活动：讨论了天气好适合去公园，但因工作原因改为周末出行。
-- 午餐选择：讨论了午餐吃什么，有成员提议点外卖。
-- 工作状态：有成员表达了工作结束后的疲惫感。
+【重要消息】
+1. 项目经理宣布下周一将召开项目评审会议
+2. 团队新成员张三将于下周加入
+3. 本月绩效考核时间调整到月底最后一周
 
-【情感分析】
-整体聊天氛围积极正面，大家互动友好。
-早上的交流充满活力，午间讨论热情，下午略显疲惫但仍保持良好状态。
+【金句】
+1. "不要用战术上的勤奋掩盖战略上的懒惰"
+2. "写代码要像写诗一样优雅"
+3. "调试困难的根本原因在于程序员不知道他们在做什么"
 
-【互动亮点】
-最具互动性的话题是关于天气和户外活动的讨论，吸引了所有活跃成员参与。
-
-【总结】
-今天是一个平静而普通的工作日，成员们在工作之余保持着轻松愉快的交流氛围。"""
+【今日总结】
+今天群内讨论热烈，主要围绕项目进展和团队建设，技术分享内容丰富，对问题的解决提供了多角度思路。"""
 
 # 检查依赖是否已安装
 def check_dependencies():
