@@ -7,7 +7,7 @@ from hoshino import Service, priv
 from nonebot import scheduler  # 导入scheduler
 from .logger_helper import log_info, log_warning, log_error_msg
 from .dailysum import start_scheduler, manual_summary, backup_logs, load_group_config, handle_daily_report_cmd
-from .test_html_report import handle_test_report  # 重新导入handle_test_report函数
+from .test_html_report import handle_test_report, initialize_fonts  # 导入字体初始化函数
 
 sv = Service(
     name='dailySum',  # 使用原来的名称
@@ -35,16 +35,44 @@ log_info("创建data目录成功")
 os.makedirs(os.path.join(os.path.dirname(__file__), 'logs'), exist_ok=True)
 log_info("创建logs目录成功")
 
-# 检查中文字体
-def check_and_copy_font():
-    """检查模块目录是否有中文字体，如果没有，尝试复制系统字体到模块目录"""
+# 统一字体初始化函数，整合原有的check_and_copy_font和新的initialize_fonts
+def init_fonts():
+    """统一初始化字体，兼容原有的函数并使用新的initialize_fonts"""
+    log_info("开始初始化字体...")
+    
+    # 首先尝试使用新的initialize_fonts函数
+    if initialize_fonts():
+        log_info("使用新方法成功初始化字体")
+        return True
+    
+    # 如果新方法失败，尝试原来的方法（作为备份）
     font_path = os.path.join(os.path.dirname(__file__), 'wqy-microhei.ttc')
     if os.path.exists(font_path):
         log_info(f"模块目录已存在中文字体: {font_path}")
         return True
     
+    # 检查项目中其他模块的字体
+    other_module_fonts = [
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), 'yaowoyizhi', 'msyh.ttc'),
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), 'pcr_calendar', 'wqy-microhei.ttc'),
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), 'generator', 'simhei.ttf'),
+    ]
+    
+    for module_font in other_module_fonts:
+        if os.path.exists(module_font):
+            try:
+                log_info(f"尝试复制项目字体 {module_font} 到模块目录")
+                shutil.copy2(module_font, font_path)
+                log_info(f"成功复制项目字体到模块目录: {font_path}")
+                return True
+            except Exception as e:
+                log_warning(f"复制项目字体失败: {str(e)}")
+    
     # 检查系统中可能存在的中文字体
     system_fonts = [
+        'C:/Windows/Fonts/msyh.ttc',     # Windows微软雅黑
+        'C:/Windows/Fonts/simhei.ttf',   # Windows黑体 
+        'C:/Windows/Fonts/simsun.ttc',   # Windows宋体
         '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
         '/usr/share/fonts/wqy-microhei/wqy-microhei.ttc',
         '/usr/share/fonts/truetype/arphic/uming.ttc',
@@ -62,11 +90,11 @@ def check_and_copy_font():
             except Exception as e:
                 log_warning(f"复制字体失败: {str(e)}")
     
-    log_warning("未能找到系统中文字体，无法复制到模块目录")
+    log_warning("未能找到可用的中文字体，图像生成功能可能无法正常工作")
     return False
 
-# 尝试复制字体
-check_and_copy_font()
+# 初始化字体
+init_fonts()
 
 # 加载群配置
 async def init_config():
