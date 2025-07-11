@@ -3,6 +3,7 @@ import re
 import asyncio
 from datetime import datetime
 from hoshino import Service, priv
+from nonebot import scheduler  # 导入scheduler
 from .logger_helper import log_info, log_warning, log_error_msg
 from .dailysum import start_scheduler, manual_summary, backup_logs, load_group_config, handle_daily_report_cmd
 from .test_html_report import handle_test_report  # 重新导入handle_test_report函数
@@ -38,10 +39,9 @@ async def init_config():
     """初始化配置"""
     await load_group_config()
 
-# 在机器人启动时执行初始化和备份操作
-@sv.on_bot_connect
-async def on_startup():
-    log_info("机器人启动，执行初始化和备份操作...")
+# 初始化和备份操作
+async def init_and_backup():
+    log_info("执行初始化和备份操作...")
     try:
         # 初始化配置
         await init_config()
@@ -50,6 +50,9 @@ async def on_startup():
         log_info("初始化备份完成")
     except Exception as e:
         log_error_msg(f"初始化或备份失败: {str(e)}")
+
+# 使用scheduler在机器人启动后执行初始化任务
+scheduler.add_job(init_and_backup, 'date', run_date=datetime.now())
 
 # 测试日报命令处理 - 专门处理"日报 测试"命令
 @sv.on_fullmatch('日报 测试')
