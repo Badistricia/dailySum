@@ -247,7 +247,7 @@ async def text_to_image(title, content, date_str):
                     if line_width > width - 2*PADDING:
                         # 需要换行
                         estimated_lines = (line_width / (width - 2*PADDING)) + 1
-                        height += (FONT_SIZE + LINE_SPACING) * estimated_lines
+                        height += (FONT_SIZE + LINE_SPACING) * int(estimated_lines)
                     else:
                         height += FONT_SIZE + LINE_SPACING
             else:
@@ -255,6 +255,10 @@ async def text_to_image(title, content, date_str):
                 height += LINE_SPACING
         
         height += 40  # 底部日期和页脚的空间
+        
+        # 确保宽度和高度为整数
+        width = int(width)
+        height = int(height)
         
         log_info(f"创建图片，宽: {width}，高: {height}")
         
