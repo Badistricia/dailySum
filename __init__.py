@@ -8,6 +8,12 @@ from nonebot import scheduler  # 导入scheduler
 from .logger_helper import log_info, log_warning, log_error_msg
 from .dailysum import start_scheduler, manual_summary, backup_logs, load_group_config, handle_daily_report_cmd
 from .test_html_report import handle_test_report, initialize_fonts  # 导入字体初始化函数
+try:
+    from .test_html_report_2 import handle_test_report_2  # 导入HTML版测试报告
+    HTML_REPORT_AVAILABLE = True
+except ImportError:
+    HTML_REPORT_AVAILABLE = False
+    log_warning("未能导入HTML版测试报告模块，可能缺少依赖")
 
 sv = Service(
     name='dailySum',  # 使用原来的名称
@@ -21,7 +27,8 @@ sv = Service(
     [日报 添加群 群号] 添加群到日报白名单
     [日报 删除群 群号] 从日报白名单移除群
     [日报 启用/禁用] 开启或关闭日报定时功能
-    [日报 测试] 生成一个HTML格式的测试日报
+    [日报 测试] 生成一个普通格式的测试日报
+    [日报 测试2] 生成一个HTML格式的测试日报(需安装playwright)
     '''.strip(),
     enable_on_default=False
 )
@@ -122,6 +129,15 @@ async def test_daily_report_cmd(bot, ev):
     log_info(f"收到测试日报命令，群号:{ev['group_id']}, 用户:{ev['user_id']}")
     await handle_test_report(bot, ev)
 
+# 测试日报2命令处理 - 专门处理"日报 测试2"命令（HTML版）
+@sv.on_fullmatch('日报 测试2')
+async def test_daily_report_2_cmd(bot, ev):
+    log_info(f"收到测试日报2命令，群号:{ev['group_id']}, 用户:{ev['user_id']}")
+    if HTML_REPORT_AVAILABLE:
+        await handle_test_report_2(bot, ev)
+    else:
+        await bot.send(ev, "HTML版测试日报功能不可用，请安装所需依赖: pip install playwright pillow")
+
 # 统一处理其他日报命令
 @sv.on_prefix(['日报'])
 async def daily_report_cmd(bot, ev):
@@ -129,8 +145,8 @@ async def daily_report_cmd(bot, ev):
     log_info(f"收到日报命令，群号:{ev['group_id']}, 用户:{ev['user_id']}, 参数:{msg}")
     
     # 测试命令已由上面的专用处理函数处理，这里跳过
-    if msg == '测试':
-        log_info("跳过测试命令，已由专用处理函数处理")
+    if msg == '测试' or msg == '测试2':
+        log_info(f"跳过测试命令[{msg}]，已由专用处理函数处理")
         return
     
     # 处理其他日报命令
