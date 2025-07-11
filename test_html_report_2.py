@@ -71,108 +71,209 @@ HTML_TEMPLATE = """
         }}
         
         body {{
-            background-color: #f7f7f7;
-            padding: 0;
+            background-color: #000;
             margin: 0;
-            color: #333;
+            padding: 0;
+            color: #fff;
             line-height: 1.6;
         }}
         
-        .report-container {{
-            width: 700px;
+        .bento-container {{
+            width: 800px;
+            padding: 20px;
+            background-color: #000;
             margin: 0;
-            background-color: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-            overflow: hidden;
         }}
         
-        .report-header {{
-            background: linear-gradient(135deg, #3498db, #2980b9);
-            color: white;
-            padding: 20px 30px;
-            position: relative;
-        }}
-        
-        .report-title {{
-            font-size: 24px;
+        .bento-title {{
+            font-size: 28px;
             font-weight: bold;
-            margin-bottom: 5px;
+            color: #fff;
+            margin-bottom: 24px;
+            text-align: center;
         }}
         
-        .report-subtitle {{
-            font-size: 14px;
-            opacity: 0.8;
+        .bento-grid {{
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            grid-auto-rows: auto;
+            gap: 16px;
         }}
         
-        .report-body {{
-            padding: 30px;
+        .bento-item {{
+            background-color: #1c1c1e;
+            border-radius: 20px;
+            padding: 20px;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            position: relative;
+            transition: all 0.3s ease;
         }}
         
-        .section {{
-            margin-bottom: 25px;
+        .bento-item-large {{
+            grid-column: span 2;
         }}
         
-        .section-title {{
+        .bento-item-title {{
             font-size: 18px;
             font-weight: bold;
-            color: #2980b9;
-            margin-bottom: 10px;
-            padding-bottom: 5px;
-            border-bottom: 1px solid #eee;
+            margin-bottom: 12px;
+            color: #0a84ff;
+            display: flex;
+            align-items: center;
         }}
         
-        .section-content {{
+        .bento-item-icon {{
+            width: 24px;
+            height: 24px;
+            margin-right: 8px;
+            background-color: #0a84ff;
+            border-radius: 6px;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            color: white;
+        }}
+        
+        .bento-item-content {{
+            color: #eee;
             font-size: 15px;
-            color: #444;
-        }}
-        
-        .section-content p {{
-            margin-bottom: 10px;
         }}
         
         ul {{
             padding-left: 20px;
-            margin-top: 5px;
-            margin-bottom: 10px;
+            margin-top: 10px;
         }}
         
         li {{
-            margin-bottom: 5px;
+            margin-bottom: 8px;
+        }}
+        
+        .bento-footer {{
+            margin-top: 16px;
+            text-align: center;
+            font-size: 13px;
+            color: #888;
         }}
         
         .highlight {{
-            background-color: #f8f9fa;
-            border-left: 3px solid #2980b9;
-            padding: 10px 15px;
-            margin: 10px 0;
-        }}
-        
-        .report-footer {{
-            padding: 15px 30px;
-            background-color: #f9f9f9;
-            color: #777;
-            font-size: 13px;
-            text-align: center;
-            border-top: 1px solid #eee;
+            color: #0a84ff;
+            font-weight: bold;
         }}
     </style>
 </head>
 <body>
-    <div class="report-container">
-        <div class="report-header">
-            <div class="report-title">{title}</div>
-            <div class="report-subtitle">AI生成的群聊分析报告</div>
+    <div class="bento-container">
+        <div class="bento-title">{title}</div>
+        
+        <div class="bento-grid">
+            <div class="bento-item bento-item-large">
+                <div class="bento-item-title">
+                    <div class="bento-item-icon">📊</div>
+                    聊天活跃度
+                </div>
+                <div class="bento-item-content" id="activity-content"></div>
+            </div>
+            
+            <div class="bento-item">
+                <div class="bento-item-title">
+                    <div class="bento-item-icon">💬</div>
+                    话题分析
+                </div>
+                <div class="bento-item-content" id="topics-content"></div>
+            </div>
+            
+            <div class="bento-item">
+                <div class="bento-item-title">
+                    <div class="bento-item-icon">😊</div>
+                    情感分析
+                </div>
+                <div class="bento-item-content" id="sentiment-content"></div>
+            </div>
+            
+            <div class="bento-item">
+                <div class="bento-item-title">
+                    <div class="bento-item-icon">🌟</div>
+                    互动亮点
+                </div>
+                <div class="bento-item-content" id="interaction-content"></div>
+            </div>
+            
+            <div class="bento-item bento-item-large">
+                <div class="bento-item-title">
+                    <div class="bento-item-icon">📝</div>
+                    总结
+                </div>
+                <div class="bento-item-content" id="summary-content"></div>
+            </div>
         </div>
         
-        <div class="report-body">
-            {content_html}
-        </div>
-        
-        <div class="report-footer">
-            由AI生成 · {date}
-        </div>
+        <div class="bento-footer">由AI生成 · {date}</div>
     </div>
+    
+    <script>
+        // 分析内容并填充到对应区块
+        function fillContent() {{
+            const content = `{content_escaped}`;
+            const sections = {{}};
+            
+            let currentSection = null;
+            let currentContent = [];
+            
+            // 解析内容分段
+            content.split('\\n').forEach(line => {{
+                if (line.startsWith('【') && line.includes('】')) {{
+                    const sectionName = line.replace('【', '').replace('】', '');
+                    currentSection = sectionName;
+                    currentContent = [];
+                    sections[sectionName] = currentContent;
+                }} else if (line.trim() && currentSection) {{
+                    currentContent.push(line);
+                }}
+            }});
+            
+            // 填充内容到对应区块
+            if (sections['聊天活跃度']) {{
+                document.getElementById('activity-content').innerHTML = sections['聊天活跃度'].join('<br>');
+            }}
+            
+            if (sections['话题分析']) {{
+                let topicsHtml = '';
+                const topics = sections['话题分析'];
+                
+                if (topics[0] && !topics[0].startsWith('-')) {{
+                    topicsHtml += `<p>${{topics[0]}}</p>`;
+                }}
+                
+                topicsHtml += '<ul>';
+                for (let i = 0; i < topics.length; i++) {{
+                    if (topics[i].startsWith('-')) {{
+                        const topic = topics[i].substring(1).trim();
+                        topicsHtml += `<li>${{topic}}</li>`;
+                    }}
+                }}
+                topicsHtml += '</ul>';
+                
+                document.getElementById('topics-content').innerHTML = topicsHtml;
+            }}
+            
+            if (sections['情感分析']) {{
+                document.getElementById('sentiment-content').innerHTML = sections['情感分析'].join('<br>');
+            }}
+            
+            if (sections['互动亮点']) {{
+                document.getElementById('interaction-content').innerHTML = sections['互动亮点'].join('<br>');
+            }}
+            
+            if (sections['总结']) {{
+                document.getElementById('summary-content').innerHTML = `<span class="highlight">${{sections['总结'].join('<br>')}}</span>`;
+            }}
+        }}
+        
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', fillContent);
+    </script>
 </body>
 </html>
 """
@@ -357,15 +458,17 @@ async def html_to_screenshot(html_path, output_path):
             
             # 等待内容加载
             await page.wait_for_load_state("networkidle")
+            await page.wait_for_timeout(1000)  # 额外等待1秒确保JavaScript执行完毕
             
             # 只截取报告容器部分，去掉周围的白边
-            container = await page.query_selector('.report-container')
+            container = await page.query_selector('.bento-container')
             if container:
                 await container.screenshot(path=output_path)
-                log_info("成功截取报告容器部分")
+                log_info("成功截取Bento Grid容器部分")
             else:
                 # 如果找不到容器，则截取整个页面
                 await page.screenshot(path=output_path, full_page=True)
+                log_info("未找到Bento容器，截取整个页面")
             
             await browser.close()
             
@@ -450,13 +553,13 @@ async def html_to_image(title, content, date_str):
         if not font_path:
             log_warning("找不到可用的中文字体")
         
-        # 将内容转换为HTML
-        content_html = convert_text_to_html(content)
+        # 内容需要转义，供JavaScript处理
+        content_escaped = content.replace('\\', '\\\\').replace('`', '\\`').replace('{', '{{').replace('}', '}}')
         
         # 生成完整的HTML
         html_content = HTML_TEMPLATE.format(
             title=title,
-            content_html=content_html,
+            content_escaped=content_escaped,
             date=date_str,
             font_path=font_path
         )
