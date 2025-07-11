@@ -1,9 +1,11 @@
 import os
 import json
 import base64
+import shutil
+import textwrap
 from datetime import datetime
 from io import BytesIO
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 import traceback
 
 # 使用nonebot原生的MessageSegment而不是从hoshino导入
@@ -13,23 +15,77 @@ from .logger_helper import log_info, log_warning, log_error_msg
 from .dailysum import HTML_TEMPLATE
 
 # 使用PIL生成图片的字体大小
-FONT_SIZE = 16
-TITLE_FONT_SIZE = 24
-LINE_SPACING = 5
-PADDING = 30
-BG_COLOR = (255, 255, 255)  # 白色背景
-TEXT_COLOR = (33, 33, 33)  # 深灰色文字
-TITLE_COLOR = (74, 107, 223)  # 标题蓝色
+FONT_SIZE = 18  # 适当增大字体
+TITLE_FONT_SIZE = 28  # 增大标题字体
+LINE_SPACING = 8  # 增加行间距
+PADDING = 40  # 增加内边距
+BG_COLOR = (252, 252, 252)  # 浅灰色背景
+TEXT_COLOR = (50, 50, 50)  # 深色文字
+TITLE_COLOR = (46, 117, 182)  # 专业的蓝色标题
+SECTION_TITLE_COLOR = (70, 130, 180)  # 小标题颜色
+BORDER_COLOR = (220, 220, 220)  # 边框颜色
+MAX_WIDTH = 1000  # 最大宽度
+MIN_WIDTH = 700  # 最小宽度
 
 # 数据目录
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 os.makedirs(DATA_DIR, exist_ok=True)
 
+def initialize_fonts():
+    """初始化字体文件，如果本地没有，则从其他模块复制"""
+    font_file = os.path.join(os.path.dirname(__file__), 'msyh.ttc')
+    
+    # 如果字体文件已存在，直接返回
+    if os.path.exists(font_file):
+        log_info(f"字体文件已存在: {font_file}")
+        return True
+    
+    # 查找项目中其他模块的字体文件
+    possible_font_sources = [
+        # 微软雅黑字体
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), 'yaowoyizhi', 'msyh.ttc'),
+        # 文泉驿字体
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), 'pcr_calendar', 'wqy-microhei.ttc'),
+        # 黑体字体
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), 'generator', 'simhei.ttf'),
+    ]
+    
+    for source in possible_font_sources:
+        if os.path.exists(source):
+            try:
+                log_info(f"从 {source} 复制字体文件到 {font_file}")
+                shutil.copy2(source, font_file)
+                log_info("字体文件复制成功")
+                return True
+            except Exception as e:
+                log_warning(f"复制字体文件失败: {str(e)}")
+    
+    # 尝试从Windows系统字体目录复制
+    windows_fonts = [
+        'C:/Windows/Fonts/msyh.ttc',    # 微软雅黑
+        'C:/Windows/Fonts/simhei.ttf',  # 黑体
+        'C:/Windows/Fonts/simsun.ttc',  # 宋体
+        'C:/Windows/Fonts/simkai.ttf',  # 楷体
+    ]
+    
+    for win_font in windows_fonts:
+        if os.path.exists(win_font):
+            try:
+                log_info(f"从系统目录复制字体: {win_font}")
+                shutil.copy2(win_font, font_file)
+                log_info("系统字体复制成功")
+                return True
+            except Exception as e:
+                log_warning(f"复制系统字体失败: {str(e)}")
+    
+    log_warning("无法找到可用的中文字体进行复制")
+    return False
+
 # 尝试加载字体
 def get_font(size):
     """获取字体，优先使用系统中文字体"""
     # 首先尝试加载模块目录下的字体，这是最可靠的
-    module_font = os.path.join(os.path.dirname(__file__), 'wqy-microhei.ttc')
+    module_font = os.path.join(os.path.dirname(__file__), 'msyh.ttc')
     if os.path.exists(module_font):
         try:
             log_info(f"使用模块目录的字体: {module_font}")
@@ -39,15 +95,20 @@ def get_font(size):
     
     # 其他系统字体
     font_paths = [
-        os.path.join(os.path.dirname(__file__), 'msyh.ttc'),  # 其他可能的模块字体
+        os.path.join(os.path.dirname(__file__), 'simhei.ttf'),  # 本地黑体
+        os.path.join(os.path.dirname(__file__), 'wqy-microhei.ttc'),  # 本地文泉驿
+        os.path.join(os.path.dirname(__file__), 'simsun.ttc'),  # 本地宋体
+        os.path.join(os.path.dirname(__file__), 'simkai.ttf'),  # 本地楷体
+        'C:/Windows/Fonts/msyh.ttc',                          # Windows微软雅黑
+        'C:/Windows/Fonts/simhei.ttf',                        # Windows黑体
+        'C:/Windows/Fonts/simsun.ttc',                        # Windows宋体 
+        'C:/Windows/Fonts/simkai.ttf',                        # Windows楷体
         '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',     # 文泉驿微米黑(常见于Linux)
         '/usr/share/fonts/wqy-microhei/wqy-microhei.ttc',     # 另一种常见路径
         '/usr/share/fonts/truetype/arphic/uming.ttc',         # AR PL UMing CN (常见于Debian/Ubuntu)
         '/usr/share/fonts/truetype/droid/DroidSansFallback.ttf', # Droid Sans Fallback
         '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc',  # Noto Sans CJK (常见于新版Linux)
         '/usr/share/fonts/noto/NotoSansCJK-Regular.ttc',      # 另一种Noto Sans路径
-        'C:/Windows/Fonts/msyh.ttc',                          # Windows微软雅黑
-        'C:/Windows/Fonts/simhei.ttf',                        # Windows黑体
         '/System/Library/Fonts/PingFang.ttc',                 # macOS苹方字体
     ]
     
@@ -75,9 +136,77 @@ async def generate_text_report(title, content, date_str):
     text_report = f"{separator}\n{title}\n{separator}\n\n{content}\n\n{separator}\n由AI生成 · {date_str}"
     return text_report
 
+def calculate_text_width(text, font):
+    """计算文本宽度"""
+    if not text:
+        return 0
+    try:
+        width = font.getlength(text)  # 新版PIL API
+        return width
+    except AttributeError:
+        try:
+            width = font.getsize(text)[0]  # 兼容旧版PIL API
+            return width
+        except Exception:
+            # 简单估算：中文字符宽度为字体大小，英文字符为字体大小的一半
+            return sum((font.size if ord(c) > 127 else font.size // 2) for c in text)
+
+def wrap_text(text, font, max_width):
+    """将文本按宽度自动换行"""
+    if not text:
+        return []
+        
+    # 分行处理内容
+    paragraphs = text.split('\n')
+    result_lines = []
+    
+    for paragraph in paragraphs:
+        if not paragraph:
+            result_lines.append("")  # 保留空行
+            continue
+            
+        words = paragraph.replace('\r', ' ').split(' ')
+        current_line = words[0]
+        
+        for word in words[1:]:
+            # 检测添加单词后是否超过最大宽度
+            test_line = f"{current_line} {word}"
+            width = calculate_text_width(test_line, font)
+            
+            if width <= max_width:
+                current_line = test_line
+            else:
+                result_lines.append(current_line)
+                current_line = word
+        
+        result_lines.append(current_line)  # 添加最后一行
+    
+    return result_lines
+
+def draw_section(draw, text, font, color, start_x, start_y, max_width):
+    """绘制带有格式的文本段落，返回下一行的y坐标"""
+    y = start_y
+    
+    # 检查文本是否包含章节标题（如【话题分析】）
+    is_section_title = text.startswith('【') and '】' in text
+    
+    if is_section_title:
+        # 为章节标题使用特殊颜色
+        draw.text((start_x, y), text, font=font, fill=SECTION_TITLE_COLOR)
+        y += font.size + LINE_SPACING * 2  # 章节标题后多空一行
+    else:
+        # 进行文本换行
+        lines = wrap_text(text, font, max_width - 2*PADDING)
+        
+        for line in lines:
+            draw.text((start_x, y), line, font=font, fill=color)
+            y += font.size + LINE_SPACING
+    
+    return y
+
 async def text_to_image(title, content, date_str):
     """
-    将文本转换为图片
+    将文本转换为美观的图片
     :param title: 标题
     :param content: 内容
     :param date_str: 日期字符串
@@ -89,49 +218,86 @@ async def text_to_image(title, content, date_str):
         # 获取字体
         font = get_font(FONT_SIZE)
         title_font = get_font(TITLE_FONT_SIZE)
+        footer_font = get_font(14)  # 页脚使用较小的字体
         
         # 如果无法获取到支持中文的字体，返回None
         if font is None or title_font is None:
             log_warning("无法获取支持中文的字体，无法生成图片")
             return None, None
         
+        # 计算图片宽度
+        width = MIN_WIDTH  # 使用固定宽度，更美观
+        
         # 分行处理内容
-        lines = content.split('\n')
-        
-        # 简单计算宽度，避免复杂的字体渲染计算
-        max_line_length = max(len(line) for line in lines)
-        max_width = max_line_length * (FONT_SIZE // 2)  # 简单估算，中文字符宽度约为高度的一半
-        title_width = len(title) * (TITLE_FONT_SIZE // 2)
-        
-        # 设置图片宽度，包含边距
-        width = max(max_width, title_width) + PADDING * 2
-        width = min(max(width, 600), 1000)  # 限制宽度范围
+        paragraphs = content.split('\n')
         
         # 计算图片高度
-        height = PADDING * 3  # 上边距 + 标题高度 + 标题与内容间距
-        height += TITLE_FONT_SIZE  # 标题高度
-        height += (FONT_SIZE + LINE_SPACING) * len(lines)  # 内容行高度
-        height += 30  # 底部日期所需空间
+        height = PADDING * 2  # 上下边距
+        height += TITLE_FONT_SIZE + LINE_SPACING * 3  # 标题高度及其下方间距
+        
+        # 预估内容高度
+        for paragraph in paragraphs:
+            if paragraph.strip():
+                if paragraph.startswith('【') and '】' in paragraph:
+                    # 章节标题额外添加间距
+                    height += FONT_SIZE + LINE_SPACING * 3
+                else:
+                    # 估算普通段落的行数
+                    line_width = calculate_text_width(paragraph, font)
+                    if line_width > width - 2*PADDING:
+                        # 需要换行
+                        estimated_lines = (line_width / (width - 2*PADDING)) + 1
+                        height += (FONT_SIZE + LINE_SPACING) * estimated_lines
+                    else:
+                        height += FONT_SIZE + LINE_SPACING
+            else:
+                # 空行
+                height += LINE_SPACING
+        
+        height += 40  # 底部日期和页脚的空间
         
         log_info(f"创建图片，宽: {width}，高: {height}")
         
         try:
-            # 创建图片
+            # 创建底图
             image = Image.new('RGB', (width, height), BG_COLOR)
             draw = ImageDraw.Draw(image)
             
+            # 绘制边框和阴影效果
+            border_width = 2
+            draw.rectangle([(border_width, border_width), (width-border_width, height-border_width)], 
+                          outline=BORDER_COLOR, width=border_width)
+            
+            # 添加顶部装饰条
+            header_height = 8
+            header_color = TITLE_COLOR
+            draw.rectangle([(0, 0), (width, header_height)], fill=header_color)
+            
+            # 绘制标题背景
+            title_bg_height = TITLE_FONT_SIZE + PADDING
+            title_bg_color = (245, 245, 245)
+            draw.rectangle([(0, header_height), (width, header_height + title_bg_height)], 
+                          fill=title_bg_color)
+            
             # 绘制标题
-            title_y = PADDING
+            title_y = header_height + PADDING // 2
             draw.text((PADDING, title_y), title, font=title_font, fill=TITLE_COLOR)
             
             # 绘制内容
-            y = title_y + TITLE_FONT_SIZE + PADDING
-            for line in lines:
-                draw.text((PADDING, y), line, font=font, fill=TEXT_COLOR)
-                y += FONT_SIZE + LINE_SPACING
+            y = header_height + title_bg_height + PADDING // 2
             
-            # 绘制日期
-            draw.text((PADDING, height - 30), f"由AI生成 · {date_str}", font=get_font(12), fill=(136, 136, 136))
+            for paragraph in paragraphs:
+                if paragraph.strip():
+                    y = draw_section(draw, paragraph, font, TEXT_COLOR, PADDING, y, width)
+                else:
+                    y += LINE_SPACING  # 空行
+            
+            # 绘制底部分隔线
+            footer_y = height - 40
+            draw.line([(PADDING, footer_y), (width - PADDING, footer_y)], fill=(200, 200, 200), width=1)
+            
+            # 绘制日期和页脚
+            draw.text((PADDING, footer_y + 10), f"由AI生成 · {date_str}", font=footer_font, fill=(136, 136, 136))
             
             # 保存临时文件
             temp_path = os.path.join(DATA_DIR, f"temp_summary_{date_str}.png")
@@ -214,6 +380,9 @@ async def handle_test_report(bot, ev):
         log_info(f"收到测试日报命令，群号:{group_id}, 用户:{user_id}")
         # 发送正在处理的提示
         await bot.send(ev, "正在生成测试日报图片，请稍候...")
+        
+        # 初始化字体
+        initialize_fonts()
         
         # 获取当前日期
         today = datetime.now().strftime('%Y-%m-%d')
