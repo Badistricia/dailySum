@@ -9,7 +9,7 @@ from .dailysum import start_scheduler, manual_summary, backup_logs, load_group_c
 from .test_html_report import handle_test_report  # 重新导入handle_test_report函数
 
 sv = Service(
-    name='daily_summary',  # 修改Service名称，避免命名冲突
+    name='dailySum',  # 修改Service名称，避免命名冲突
     bundle='日常',
     help_='''
     [日报] 手动触发当天群聊总结
