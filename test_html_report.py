@@ -8,7 +8,8 @@ from PIL import Image, ImageDraw, ImageFont
 import asyncio
 import traceback
 
-from hoshino import Service, MessageSegment
+from hoshino import Service
+from nonebot.message import MessageSegment  # 修改为与 dailysum.py 相同的导入方式
 from hoshino.typing import CQEvent
 
 from .logger_helper import log_info, log_warning, log_error_msg
