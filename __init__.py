@@ -9,7 +9,7 @@ from .dailysum import start_scheduler, manual_summary, backup_logs, load_group_c
 from .test_html_report import handle_test_report  # 重新导入handle_test_report函数
 
 sv = Service(
-    name='dailySum',  # 修改Service名称，避免命名冲突
+    name='dailySum',  # 使用原来的名称
     bundle='日常',
     help_='''
     [日报] 手动触发当天群聊总结
@@ -68,6 +68,7 @@ async def daily_report_cmd(bot, ev):
     
     # 测试命令已由上面的专用处理函数处理，这里跳过
     if msg == '测试':
+        log_info("跳过测试命令，已由专用处理函数处理")
         return
     
     # 处理其他日报命令

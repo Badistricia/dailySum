@@ -151,12 +151,11 @@ async def html_to_image(title, content, date_str):
     :return: HTML文件路径和图片路径
     """
     try:
-        # 生成HTML内容
-        html_content = HTML_TEMPLATE.format(
-            title=title,
-            content=content,
-            date=date_str
-        )
+        # 生成HTML内容 - 使用替换而非格式化，避免CSS中的大括号被解释为占位符
+        html_content = HTML_TEMPLATE
+        html_content = html_content.replace("{title}", title)
+        html_content = html_content.replace("{content}", content)
+        html_content = html_content.replace("{date}", date_str)
         
         # 生成临时文件路径
         temp_html_path = os.path.join(DATA_DIR, f"test_summary_{date_str}.html")
@@ -220,29 +219,48 @@ async def handle_test_report(bot, ev):
         
         log_info(f"使用预设摘要生成图片，标题: {title}")
         
-        # 尝试转换为图片
-        html_path, image_path = await html_to_image(title, content, today)
+        # 使用text_to_image直接生成图片，避免HTML格式问题
+        log_info("开始生成图片...")
+        image, image_path = await text_to_image(title, content, today)
         
         if image_path and os.path.exists(image_path):
             # 发送图片
             log_info(f"准备发送图片: {image_path}")
+            success = False
+            
+            # 尝试方法1：使用file:///路径
             try:
                 await bot.send(ev, MessageSegment.image(f'file:///{image_path}'))
-                log_info("测试日报图片已发送")
-            except Exception as e:
-                log_error_msg(f"发送图片失败: {str(e)}")
-                log_error_msg(traceback.format_exc())
-                # 如果发送失败，尝试使用base64格式
+                log_info("使用file:///路径发送图片成功")
+                success = True
+            except Exception as e1:
+                log_warning(f"使用file:///路径发送图片失败: {str(e1)}")
+                
+                # 尝试方法2：使用base64编码
                 try:
+                    log_info("尝试使用base64编码发送图片...")
                     with open(image_path, 'rb') as f:
                         img_bytes = f.read()
                     b64_str = base64.b64encode(img_bytes).decode()
                     await bot.send(ev, MessageSegment.image(f'base64://{b64_str}'))
-                    log_info("使用base64格式发送图片成功")
+                    log_info("使用base64编码发送图片成功")
+                    success = True
                 except Exception as e2:
-                    log_error_msg(f"使用base64发送图片失败: {str(e2)}")
-                    # 最终失败，发送文本
-                    await bot.send(ev, f"【测试日报 - 图片发送失败】\n{title}\n\n{content}")
+                    log_warning(f"使用base64编码发送图片失败: {str(e2)}")
+                    
+                    # 尝试方法3：直接发送本地路径
+                    try:
+                        log_info("尝试直接发送本地图片路径...")
+                        await bot.send(ev, MessageSegment.image(image_path))
+                        log_info("直接发送本地图片路径成功")
+                        success = True
+                    except Exception as e3:
+                        log_error_msg(f"所有图片发送方法都失败: {str(e3)}")
+                        
+            if not success:
+                # 所有方法都失败，发送文本版本
+                log_warning("所有图片发送方法都失败，发送文本版本")
+                await bot.send(ev, f"【测试日报 - 图片发送失败】\n{title}\n\n{content}")
         else:
             # 如果图片生成失败，发送文本
             log_warning("测试日报图片生成失败，发送文本版本")
