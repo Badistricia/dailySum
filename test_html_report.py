@@ -28,14 +28,27 @@ os.makedirs(DATA_DIR, exist_ok=True)
 # 尝试加载字体
 def get_font(size):
     """获取字体，优先使用系统中文字体"""
+    # 首先尝试加载模块目录下的字体，这是最可靠的
+    module_font = os.path.join(os.path.dirname(__file__), 'wqy-microhei.ttc')
+    if os.path.exists(module_font):
+        try:
+            log_info(f"使用模块目录的字体: {module_font}")
+            return ImageFont.truetype(module_font, size)
+        except Exception as e:
+            log_warning(f"加载模块字体失败: {str(e)}")
+    
+    # 其他系统字体
     font_paths = [
-        os.path.join(os.path.dirname(__file__), 'msyh.ttc'),  # 优先使用模块目录下的字体
-        'C:/Windows/Fonts/msyh.ttc',  # Windows微软雅黑
-        'C:/Windows/Fonts/simhei.ttf',  # Windows黑体
-        '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',  # Linux
-        '/System/Library/Fonts/PingFang.ttc',  # macOS
-        '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',  # 文泉驿微米黑(常见于Linux)
-        '/usr/share/fonts/wqy-microhei/wqy-microhei.ttc'  # 另一种常见路径
+        os.path.join(os.path.dirname(__file__), 'msyh.ttc'),  # 其他可能的模块字体
+        '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',     # 文泉驿微米黑(常见于Linux)
+        '/usr/share/fonts/wqy-microhei/wqy-microhei.ttc',     # 另一种常见路径
+        '/usr/share/fonts/truetype/arphic/uming.ttc',         # AR PL UMing CN (常见于Debian/Ubuntu)
+        '/usr/share/fonts/truetype/droid/DroidSansFallback.ttf', # Droid Sans Fallback
+        '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc',  # Noto Sans CJK (常见于新版Linux)
+        '/usr/share/fonts/noto/NotoSansCJK-Regular.ttc',      # 另一种Noto Sans路径
+        'C:/Windows/Fonts/msyh.ttc',                          # Windows微软雅黑
+        'C:/Windows/Fonts/simhei.ttf',                        # Windows黑体
+        '/System/Library/Fonts/PingFang.ttc',                 # macOS苹方字体
     ]
     
     for font_path in font_paths:
@@ -46,13 +59,21 @@ def get_font(size):
         except Exception as e:
             log_warning(f"加载字体 {font_path} 失败: {str(e)}")
     
-    # 如果所有字体都失败，使用默认字体
-    try:
-        log_info("使用默认字体")
-        return ImageFont.truetype(ImageFont.load_default().path, size)
-    except:
-        log_info("加载默认字体")
-        return ImageFont.load_default()
+    # 如果无法加载任何中文字体，返回None，后续将使用纯文本备选方案
+    log_warning("找不到可用的中文字体，将使用纯文本方式")
+    return None
+
+async def generate_text_report(title, content, date_str):
+    """
+    当无法生成图片时，生成美观的文本报告
+    :param title: 标题
+    :param content: 内容
+    :param date_str: 日期字符串
+    :return: 文本报告
+    """
+    separator = "=" * 30
+    text_report = f"{separator}\n{title}\n{separator}\n\n{content}\n\n{separator}\n由AI生成 · {date_str}"
+    return text_report
 
 async def text_to_image(title, content, date_str):
     """
@@ -69,38 +90,18 @@ async def text_to_image(title, content, date_str):
         font = get_font(FONT_SIZE)
         title_font = get_font(TITLE_FONT_SIZE)
         
+        # 如果无法获取到支持中文的字体，返回None
+        if font is None or title_font is None:
+            log_warning("无法获取支持中文的字体，无法生成图片")
+            return None, None
+        
         # 分行处理内容
         lines = content.split('\n')
         
-        # 计算每行文字宽度
-        max_width = 0
-        for line in lines:
-            try:
-                if hasattr(font, 'getbbox'):
-                    bbox = font.getbbox(line)
-                    width = bbox[2] - bbox[0]
-                elif hasattr(font, 'getmask'):
-                    width = font.getmask(line).getbbox()[2]
-                else:
-                    width = len(line) * FONT_SIZE
-                max_width = max(max_width, width)
-            except Exception as e:
-                log_warning(f"计算文字宽度出错: {str(e)}")
-                width = len(line) * FONT_SIZE
-                max_width = max(max_width, width)
-        
-        # 计算标题宽度
-        try:
-            if hasattr(title_font, 'getbbox'):
-                bbox = title_font.getbbox(title)
-                title_width = bbox[2] - bbox[0]
-            elif hasattr(title_font, 'getmask'):
-                title_width = title_font.getmask(title).getbbox()[2]
-            else:
-                title_width = len(title) * TITLE_FONT_SIZE
-        except Exception as e:
-            log_warning(f"计算标题宽度出错: {str(e)}")
-            title_width = len(title) * TITLE_FONT_SIZE
+        # 简单计算宽度，避免复杂的字体渲染计算
+        max_line_length = max(len(line) for line in lines)
+        max_width = max_line_length * (FONT_SIZE // 2)  # 简单估算，中文字符宽度约为高度的一半
+        title_width = len(title) * (TITLE_FONT_SIZE // 2)
         
         # 设置图片宽度，包含边距
         width = max(max_width, title_width) + PADDING * 2
@@ -114,29 +115,33 @@ async def text_to_image(title, content, date_str):
         
         log_info(f"创建图片，宽: {width}，高: {height}")
         
-        # 创建图片
-        image = Image.new('RGB', (width, height), BG_COLOR)
-        draw = ImageDraw.Draw(image)
-        
-        # 绘制标题
-        title_y = PADDING
-        draw.text((PADDING, title_y), title, font=title_font, fill=TITLE_COLOR)
-        
-        # 绘制内容
-        y = title_y + TITLE_FONT_SIZE + PADDING
-        for line in lines:
-            draw.text((PADDING, y), line, font=font, fill=TEXT_COLOR)
-            y += FONT_SIZE + LINE_SPACING
-        
-        # 绘制日期
-        draw.text((PADDING, height - 30), f"由AI生成 · {date_str}", font=get_font(12), fill=(136, 136, 136))
-        
-        # 保存临时文件
-        temp_path = os.path.join(DATA_DIR, f"temp_summary_{date_str}.png")
-        image.save(temp_path)
-        
-        log_info(f"成功生成图片: {temp_path}")
-        return image, temp_path
+        try:
+            # 创建图片
+            image = Image.new('RGB', (width, height), BG_COLOR)
+            draw = ImageDraw.Draw(image)
+            
+            # 绘制标题
+            title_y = PADDING
+            draw.text((PADDING, title_y), title, font=title_font, fill=TITLE_COLOR)
+            
+            # 绘制内容
+            y = title_y + TITLE_FONT_SIZE + PADDING
+            for line in lines:
+                draw.text((PADDING, y), line, font=font, fill=TEXT_COLOR)
+                y += FONT_SIZE + LINE_SPACING
+            
+            # 绘制日期
+            draw.text((PADDING, height - 30), f"由AI生成 · {date_str}", font=get_font(12), fill=(136, 136, 136))
+            
+            # 保存临时文件
+            temp_path = os.path.join(DATA_DIR, f"temp_summary_{date_str}.png")
+            image.save(temp_path)
+            
+            log_info(f"成功生成图片: {temp_path}")
+            return image, temp_path
+        except UnicodeEncodeError as ue:
+            log_error_msg(f"绘制文本时出现Unicode编码错误: {str(ue)}")
+            return None, None
     except Exception as e:
         log_error_msg(f"文本转图片失败: {str(e)}")
         log_error_msg(traceback.format_exc())
@@ -219,11 +224,11 @@ async def handle_test_report(bot, ev):
         
         log_info(f"使用预设摘要生成图片，标题: {title}")
         
-        # 使用text_to_image直接生成图片，避免HTML格式问题
+        # 尝试生成图片
         log_info("开始生成图片...")
         image, image_path = await text_to_image(title, content, today)
         
-        if image_path and os.path.exists(image_path):
+        if image and image_path and os.path.exists(image_path):
             # 发送图片
             log_info(f"准备发送图片: {image_path}")
             success = False
@@ -260,11 +265,13 @@ async def handle_test_report(bot, ev):
             if not success:
                 # 所有方法都失败，发送文本版本
                 log_warning("所有图片发送方法都失败，发送文本版本")
-                await bot.send(ev, f"【测试日报 - 图片发送失败】\n{title}\n\n{content}")
+                text_report = await generate_text_report(title, content, today)
+                await bot.send(ev, text_report)
         else:
             # 如果图片生成失败，发送文本
             log_warning("测试日报图片生成失败，发送文本版本")
-            await bot.send(ev, f"【测试日报 - 图片生成失败】\n{title}\n\n{content}")
+            text_report = await generate_text_report(title, content, today)
+            await bot.send(ev, text_report)
             
     except Exception as e:
         log_error_msg(f"处理测试日报命令失败: {str(e)}")

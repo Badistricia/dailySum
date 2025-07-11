@@ -1,6 +1,7 @@
 import os
 import re
 import asyncio
+import shutil
 from datetime import datetime
 from hoshino import Service, priv
 from nonebot import scheduler  # 导入scheduler
@@ -33,6 +34,39 @@ log_info("创建data目录成功")
 # 创建logs目录
 os.makedirs(os.path.join(os.path.dirname(__file__), 'logs'), exist_ok=True)
 log_info("创建logs目录成功")
+
+# 检查中文字体
+def check_and_copy_font():
+    """检查模块目录是否有中文字体，如果没有，尝试复制系统字体到模块目录"""
+    font_path = os.path.join(os.path.dirname(__file__), 'wqy-microhei.ttc')
+    if os.path.exists(font_path):
+        log_info(f"模块目录已存在中文字体: {font_path}")
+        return True
+    
+    # 检查系统中可能存在的中文字体
+    system_fonts = [
+        '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+        '/usr/share/fonts/wqy-microhei/wqy-microhei.ttc',
+        '/usr/share/fonts/truetype/arphic/uming.ttc',
+        '/usr/share/fonts/truetype/droid/DroidSansFallback.ttf',
+        '/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc'
+    ]
+    
+    for sys_font in system_fonts:
+        if os.path.exists(sys_font):
+            try:
+                log_info(f"尝试复制系统字体 {sys_font} 到模块目录")
+                shutil.copy2(sys_font, font_path)
+                log_info(f"成功复制字体到模块目录: {font_path}")
+                return True
+            except Exception as e:
+                log_warning(f"复制字体失败: {str(e)}")
+    
+    log_warning("未能找到系统中文字体，无法复制到模块目录")
+    return False
+
+# 尝试复制字体
+check_and_copy_font()
 
 # 加载群配置
 async def init_config():
