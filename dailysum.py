@@ -1074,16 +1074,38 @@ async def handle_daily_report_cmd(bot, ev, msg):
         if msg.strip() == '测试3' or msg.strip() == '测试日报3' or msg.strip() == '测试日报AI':
             # 这个命令在__init__.py中通过sv.on_fullmatch处理，这里不做处理
             return
-        # 手动触发日报生成
-        await manual_summary(bot, ev)
+        
+        # 检查是否指定了群号 - 格式：测试 群号
+        parts = msg.split()
+        if len(parts) >= 2 and parts[1].isdigit():
+            target_group = parts[1]
+            # 手动触发日报生成（指定群）
+            await manual_summary(bot, ev, day_offset=0, target_group=target_group)
+        else:
+            # 手动触发日报生成（当前群）
+            await manual_summary(bot, ev)
     
     elif msg.startswith('昨日'):
-        # 生成昨天的日报
-        await manual_summary(bot, ev, day_offset=1)
+        # 检查是否指定了群号 - 格式：昨日 群号
+        parts = msg.split()
+        if len(parts) >= 2 and parts[1].isdigit():
+            target_group = parts[1]
+            # 生成昨天指定群的日报
+            await manual_summary(bot, ev, day_offset=1, target_group=target_group)
+        else:
+            # 生成昨天当前群的日报
+            await manual_summary(bot, ev, day_offset=1)
     
     elif msg.startswith('前日'):
-        # 生成前天的日报
-        await manual_summary(bot, ev, day_offset=2)
+        # 检查是否指定了群号 - 格式：前日 群号
+        parts = msg.split()
+        if len(parts) >= 2 and parts[1].isdigit():
+            target_group = parts[1]
+            # 生成前天指定群的日报
+            await manual_summary(bot, ev, day_offset=2, target_group=target_group)
+        else:
+            # 生成前天当前群的日报
+            await manual_summary(bot, ev, day_offset=2)
         
     elif msg.startswith(('指定', '查询')):
         # 指定日期生成
@@ -1091,12 +1113,22 @@ async def handle_daily_report_cmd(bot, ev, msg):
         parts = msg.split()
         if len(parts) >= 2 and parts[1].isdigit():
             day_offset = int(parts[1])
-            if day_offset <= 30:  # 限制最多查询30天前
-                await manual_summary(bot, ev, day_offset=day_offset)
-            else:
+            
+            # 检查是否超过天数限制
+            if day_offset > 30:
                 await bot.send(ev, '最多只能查询30天前的记录')
+                return
+                
+            # 检查是否指定了群号 - 格式：指定 N 群号
+            if len(parts) >= 3 and parts[2].isdigit():
+                target_group = parts[2]
+                # 生成指定天数前指定群的日报
+                await manual_summary(bot, ev, day_offset=day_offset, target_group=target_group)
+            else:
+                # 生成指定天数前当前群的日报
+                await manual_summary(bot, ev, day_offset=day_offset)
         else:
-            await bot.send(ev, '日期格式有误，正确格式: 指定 N (N为天数)')
+            await bot.send(ev, '日期格式有误，正确格式: 指定 N (N为天数) [群号]')
     
     elif msg.startswith('设置浏览器'):
         # 设置自定义浏览器路径
@@ -1143,11 +1175,15 @@ async def handle_daily_report_cmd(bot, ev, msg):
 - 禁用/关闭：禁用日报功能
 - 状态：查看日报配置状态
 - 测试：手动生成今日日报
+- 测试 群号：生成指定群的今日日报
 - 测试日报2：生成HTML版测试日报
 - 测试日报3/测试日报AI：使用AI直接生成HTML版日报
 - 昨日：生成昨天的日报
+- 昨日 群号：生成指定群昨天的日报
 - 前日：生成前天的日报
+- 前日 群号：生成指定群前天的日报
 - 指定 N：生成N天前的日报
+- 指定 N 群号：生成指定群N天前的日报
 - 设置浏览器 路径：设置自定义浏览器路径
 - 初始化playwright：手动初始化Playwright
 - 帮助：显示本帮助信息"""
