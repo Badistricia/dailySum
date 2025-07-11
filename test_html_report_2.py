@@ -623,19 +623,31 @@ async def html_to_image(title, content, date_str):
         # 预处理内容，确保能被正确解析
         processed_content = preprocess_content(content)
         
-        # 转义内容中的大括号，防止格式化错误
+        # 转义内容中的大括号，防止格式化错误 - 更彻底的处理
         processed_content = processed_content.replace("{", "{{").replace("}", "}}")
         
         # 内容需要转义，供JavaScript处理
         content_escaped = processed_content.replace('\\', '\\\\').replace('`', '\\`')
         
-        # 生成完整的HTML
-        html_content = HTML_TEMPLATE.format(
-            title=title,
-            content_escaped=content_escaped,
-            date=date_str,
-            font_path=font_path
-        )
+        # 使用更安全的方式构建HTML内容，避免直接使用format
+        try:
+            # 尝试生成完整的HTML - 显式指定所有参数
+            html_content = HTML_TEMPLATE.format(
+                title=title,
+                content_escaped=content_escaped,
+                date=date_str,
+                font_path=font_path
+            )
+        except KeyError as ke:
+            log_error_msg(f"格式化HTML时发生KeyError错误: {ke}")
+            log_error_msg(f"尝试的参数: title={title[:20]}..., date={date_str}, font_path={font_path}")
+            # 第二种尝试方法 - 手动替换
+            html_content = HTML_TEMPLATE
+            html_content = html_content.replace("{title}", title)
+            html_content = html_content.replace("{content_escaped}", content_escaped)
+            html_content = html_content.replace("{date}", date_str)
+            html_content = html_content.replace("{font_path}", font_path)
+            log_info("使用手动替换方法构建HTML成功")
         
         # 保存HTML文件
         temp_html_path = os.path.join(DATA_DIR, f"report_{date_str}.html")
@@ -656,8 +668,10 @@ async def html_to_image(title, content, date_str):
         else:
             return temp_html_path, None
     except Exception as e:
+        import traceback
+        error_msg = traceback.format_exc()
         log_error_msg(f"HTML转图片过程中出错: {str(e)}")
-        log_error_msg(traceback.format_exc())
+        log_error_msg(f"完整错误堆栈:\n{error_msg}")
         return None, None
 
 def preprocess_content(content):
