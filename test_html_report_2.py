@@ -6,6 +6,7 @@ import asyncio
 from datetime import datetime
 import traceback
 from pathlib import Path
+import re # Added for preprocess_content
 
 # 导入第三方库
 try:
@@ -221,54 +222,102 @@ HTML_TEMPLATE = """
             let currentSection = null;
             let currentContent = [];
             
-            // 解析内容分段
+            // 解析内容分段 - 增强版，支持多种标题格式
             content.split('\\n').forEach(line => {{
-                if (line.startsWith('【') && line.includes('】')) {{
-                    const sectionName = line.replace('【', '').replace('】', '');
+                // 匹配【标题】格式
+                let titleMatch = line.match(/^\s*【(.+?)】\s*$/);
+                // 匹配**【标题】**格式（markdown格式）
+                if (!titleMatch) titleMatch = line.match(/^\s*\*\*【(.+?)】\*\*\s*$/);
+                
+                if (titleMatch) {{
+                    const sectionName = titleMatch[1];
                     currentSection = sectionName;
                     currentContent = [];
                     sections[sectionName] = currentContent;
                 }} else if (line.trim() && currentSection) {{
-                    currentContent.push(line);
+                    // 去除Markdown格式的**标记和一些特殊格式
+                    let cleanLine = line.replace(/\*\*/g, '');
+                    currentContent.push(cleanLine);
                 }}
             }});
             
-            // 填充内容到对应区块
-            if (sections['聊天活跃度']) {{
-                document.getElementById('activity-content').innerHTML = sections['聊天活跃度'].join('<br>');
-            }}
+            // 如果没有找到任何标题部分，则尝试按不同格式再解析一遍
+            if (Object.keys(sections).length === 0) {
+                // 处理整段式的内容，按照明显的分隔来处理
+                let allContent = content.split('\\n');
+                let fullText = allContent.join('\\n');
+                
+                // 尝试查找标题模式
+                let activityMatch = fullText.match(/活跃度[\s\S]*?(?=话题分析|情感分析|互动亮点|总结|$)/i);
+                let topicsMatch = fullText.match(/话题分析[\s\S]*?(?=情感分析|互动亮点|总结|$)/i);
+                let sentimentMatch = fullText.match(/情感分析[\s\S]*?(?=互动亮点|总结|$)/i);
+                let interactionMatch = fullText.match(/互动亮点[\s\S]*?(?=总结|$)/i);
+                let summaryMatch = fullText.match(/总结[\s\S]*/i);
+                
+                if (activityMatch) sections["聊天活跃度"] = [activityMatch[0].replace(/活跃度[：:]\s*/i, '')];
+                if (topicsMatch) sections["话题分析"] = [topicsMatch[0].replace(/话题分析[：:]\s*/i, '')];
+                if (sentimentMatch) sections["情感分析"] = [sentimentMatch[0].replace(/情感分析[：:]\s*/i, '')];
+                if (interactionMatch) sections["互动亮点"] = [interactionMatch[0].replace(/互动亮点[：:]\s*/i, '')];
+                if (summaryMatch) sections["总结"] = [summaryMatch[0].replace(/总结[：:]\s*/i, '')];
+            }
             
-            if (sections['话题分析']) {{
+            // 填充内容到对应区块
+            if (sections['聊天活跃度'] || sections['活跃度']) {
+                let activityContent = sections['聊天活跃度'] || sections['活跃度'];
+                document.getElementById('activity-content').innerHTML = activityContent.join('<br>');
+            } else {
+                document.getElementById('activity-content').innerHTML = '<p>今日无聊天数据</p>';
+            }
+            
+            if (sections['话题分析']) {
                 let topicsHtml = '';
                 const topics = sections['话题分析'];
                 
-                if (topics[0] && !topics[0].startsWith('-')) {{
-                    topicsHtml += `<p>${{topics[0]}}</p>`;
-                }}
+                // 构造话题HTML，特别处理列表项
+                let hasListItems = false;
+                topicsHtml = '<ul>';
                 
-                topicsHtml += '<ul>';
-                for (let i = 0; i < topics.length; i++) {{
-                    if (topics[i].startsWith('-')) {{
-                        const topic = topics[i].substring(1).trim();
-                        topicsHtml += `<li>${{topic}}</li>`;
-                    }}
-                }}
+                for (let i = 0; i < topics.length; i++) {
+                    let line = topics[i];
+                    // 处理以"-"开头的列表项
+                    if (line.trim().startsWith('-')) {
+                        hasListItems = true;
+                        const topic = line.trim().substring(1).trim();
+                        topicsHtml += `<li>${topic}</li>`;
+                    } else if (!hasListItems) {
+                        // 非列表项且还没有列表项，作为描述添加
+                        topicsHtml = `<p>${line}</p>` + topicsHtml;
+                    }
+                }
                 topicsHtml += '</ul>';
                 
+                // 如果没有列表项，显示整段文本
+                if (!hasListItems) {
+                    topicsHtml = topics.join('<br>');
+                }
+                
                 document.getElementById('topics-content').innerHTML = topicsHtml;
-            }}
+            } else {
+                document.getElementById('topics-content').innerHTML = '<p>无特定话题</p>';
+            }
             
-            if (sections['情感分析']) {{
+            if (sections['情感分析']) {
                 document.getElementById('sentiment-content').innerHTML = sections['情感分析'].join('<br>');
-            }}
+            } else {
+                document.getElementById('sentiment-content').innerHTML = '<p>无情感分析数据</p>';
+            }
             
-            if (sections['互动亮点']) {{
+            if (sections['互动亮点']) {
                 document.getElementById('interaction-content').innerHTML = sections['互动亮点'].join('<br>');
-            }}
+            } else {
+                document.getElementById('interaction-content').innerHTML = '<p>今日无特别互动</p>';
+            }
             
-            if (sections['总结']) {{
-                document.getElementById('summary-content').innerHTML = `<span class="highlight">${{sections['总结'].join('<br>')}}</span>`;
-            }}
+            if (sections['总结']) {
+                document.getElementById('summary-content').innerHTML = `<span class="highlight">${sections['总结'].join('<br>')}</span>`;
+            } else {
+                document.getElementById('summary-content').innerHTML = '<p>今日聊天较少，无需总结</p>';
+            }
         }}
         
         // 页面加载完成后执行
@@ -553,8 +602,11 @@ async def html_to_image(title, content, date_str):
         if not font_path:
             log_warning("找不到可用的中文字体")
         
+        # 预处理内容，确保能被正确解析
+        processed_content = preprocess_content(content)
+        
         # 内容需要转义，供JavaScript处理
-        content_escaped = content.replace('\\', '\\\\').replace('`', '\\`').replace('{', '{{').replace('}', '}}')
+        content_escaped = processed_content.replace('\\', '\\\\').replace('`', '\\`').replace('{', '{{').replace('}', '}}')
         
         # 生成完整的HTML
         html_content = HTML_TEMPLATE.format(
@@ -586,6 +638,77 @@ async def html_to_image(title, content, date_str):
         log_error_msg(f"HTML转图片过程中出错: {str(e)}")
         log_error_msg(traceback.format_exc())
         return None, None
+
+def preprocess_content(content):
+    """
+    预处理内容，确保能被JavaScript正确解析
+    :param content: 原始内容
+    :return: 处理后的内容
+    """
+    # 如果内容没有明确的【】分段，尝试进行格式化
+    if "【聊天活跃度】" not in content and "【活跃度】" not in content:
+        # 尝试从内容中提取各部分
+        processed = ""
+        
+        # 提取聊天活跃度
+        activity_match = re.search(r'活跃度[：:]?([\s\S]*?)(?=话题分析|情感分析|互动亮点|总结|$)', content, re.IGNORECASE)
+        if activity_match:
+            processed += "【聊天活跃度】\n" + activity_match.group(1).strip() + "\n\n"
+        
+        # 提取话题分析
+        topics_match = re.search(r'话题分析[：:]?([\s\S]*?)(?=情感分析|互动亮点|总结|$)', content, re.IGNORECASE)
+        if topics_match:
+            processed += "【话题分析】\n" + topics_match.group(1).strip() + "\n\n"
+        
+        # 提取情感分析
+        sentiment_match = re.search(r'情感分析[：:]?([\s\S]*?)(?=互动亮点|总结|$)', content, re.IGNORECASE)
+        if sentiment_match:
+            processed += "【情感分析】\n" + sentiment_match.group(1).strip() + "\n\n"
+        
+        # 提取互动亮点
+        interaction_match = re.search(r'互动亮点[：:]?([\s\S]*?)(?=总结|$)', content, re.IGNORECASE)
+        if interaction_match:
+            processed += "【互动亮点】\n" + interaction_match.group(1).strip() + "\n\n"
+        
+        # 提取总结
+        summary_match = re.search(r'总结[：:]?([\s\S]*)', content, re.IGNORECASE)
+        if summary_match:
+            processed += "【总结】\n" + summary_match.group(1).strip() + "\n\n"
+        
+        # 如果仍然没有合适的分段，使用fallback方式分割内容
+        if not processed or "【" not in processed:
+            lines = content.split('\n')
+            # 跳过前两行（通常是标题和空行）
+            start_idx = 0
+            for i in range(min(3, len(lines))):
+                if "日报" in lines[i] or "字数" in lines[i] or not lines[i].strip():
+                    start_idx = i + 1
+            
+            # 强制分段
+            chunks = []
+            current_chunk = []
+            for line in lines[start_idx:]:
+                if line.strip() and (line.startswith('**') or line.strip().startswith('-')):
+                    if current_chunk:
+                        chunks.append('\n'.join(current_chunk))
+                        current_chunk = []
+                current_chunk.append(line)
+            
+            if current_chunk:
+                chunks.append('\n'.join(current_chunk))
+            
+            if len(chunks) >= 5:  # 尝试匹配我们的5个部分
+                processed = "【聊天活跃度】\n" + chunks[0] + "\n\n"
+                processed += "【话题分析】\n" + chunks[1] + "\n\n"
+                processed += "【情感分析】\n" + chunks[2] + "\n\n"
+                processed += "【互动亮点】\n" + chunks[3] + "\n\n"
+                processed += "【总结】\n" + '\n'.join(chunks[4:]) + "\n\n"
+            else:
+                # 最后的fallback：把所有内容放到一起
+                processed = "【聊天摘要】\n" + content
+        
+        return processed
+    return content
 
 # 测试日报摘要文本
 TEST_SUMMARY = """【聊天活跃度】

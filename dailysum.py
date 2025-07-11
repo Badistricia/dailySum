@@ -742,6 +742,10 @@ async def execute_daily_summary(bot, target_groups=None, day_offset=0, start_hou
                 log_warning(f"群 {group_id} 的摘要生成失败，跳过")
                 return False
             
+            # 日志记录生成的摘要内容，方便调试
+            log_info(f"AI生成的摘要内容:\n{summary[:200]}...")
+            log_debug(f"完整摘要内容:\n{summary}")
+            
             # 发送日报
             try:
                 # 生成标题
@@ -878,6 +882,10 @@ async def manual_summary(bot, ev, day_offset=0, target_group=None):
         # 生成标题
         title = f"{date_str} {'群 '+target_group if target_group != current_group_id else '本群'}聊天日报"
         
+        # 日志记录生成的摘要内容，方便调试
+        log_info(f"AI生成的摘要内容:\n{summary[:200]}...")
+        log_debug(f"完整摘要内容:\n{summary}")
+        
         # 尝试生成图片版本
         image_data = None
         if PLAYWRIGHT_AVAILABLE:
@@ -1002,6 +1010,9 @@ async def handle_daily_report_cmd(bot, ev, msg):
         await bot.send(ev, status_text)
     
     elif msg.startswith('测试'):
+        if msg.strip() == '测试3' or msg.strip() == '测试日报3' or msg.strip() == '测试日报AI':
+            # 这个命令在__init__.py中通过sv.on_fullmatch处理，这里不做处理
+            return
         # 手动触发日报生成
         await manual_summary(bot, ev)
     
@@ -1071,6 +1082,8 @@ async def handle_daily_report_cmd(bot, ev, msg):
 - 禁用/关闭：禁用日报功能
 - 状态：查看日报配置状态
 - 测试：手动生成今日日报
+- 测试日报2：生成HTML版测试日报
+- 测试日报3/测试日报AI：使用AI直接生成HTML版日报
 - 昨日：生成昨天的日报
 - 前日：生成前天的日报
 - 指定 N：生成N天前的日报
