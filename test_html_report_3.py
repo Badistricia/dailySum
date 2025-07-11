@@ -278,20 +278,25 @@ async def init_playwright():
         log_error_msg(f"初始化Playwright失败: {str(e)}")
         return False
 
-async def generate_html_report(group_id, title, date_str, test_mode=False):
+async def generate_html_report(group_id, title, date_str, test_mode=False, summary_content=None):
     """
     生成HTML日报并转换为图片
     :param group_id: 群号
     :param title: 标题
     :param date_str: 日期字符串
     :param test_mode: 是否为测试模式
+    :param summary_content: 已生成的摘要内容，如果提供则直接使用
     :return: HTML文件路径和图片路径
     """
     try:
         log_info(f"开始生成HTML日报，群号: {group_id}，日期: {date_str}")
         
+        # 如果提供了摘要内容，则直接使用
+        if summary_content:
+            log_info("使用预生成的摘要内容")
+            chat_log = summary_content
         # 测试模式下使用预设的聊天记录
-        if test_mode:
+        elif test_mode:
             chat_log = "这是测试聊天记录。\n用户A: 今天天气真好！\n用户B: 是啊，适合出去玩。\n用户C: 我们去公园吧？\n用户A: 好主意！"
         else:
             # 实际模式下需要从文件加载聊天记录
@@ -307,7 +312,10 @@ async def generate_html_report(group_id, title, date_str, test_mode=False):
                 # 构建聊天记录文本
                 chat_log = ""
                 for msg in messages[:100]:  # 限制消息数量
-                    chat_log += f"{msg['time']} {msg['user']}: {msg['content']}\n"
+                    user = msg.get('qq', 'Unknown')
+                    content = msg.get('content', '')
+                    time_str = msg.get('time', '')
+                    chat_log += f"{time_str} {user}: {content}\n"
             except Exception as e:
                 log_error_msg(f"读取聊天记录失败: {str(e)}")
                 return None, None
