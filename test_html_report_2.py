@@ -22,6 +22,31 @@ from .logger_helper import log_info, log_warning, log_error_msg
 DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# 用于存储自定义浏览器路径
+CUSTOM_BROWSER_PATH = ""
+
+# 浏览器配置文件路径
+BROWSER_CONFIG_PATH = os.path.join(DATA_DIR, 'browser_config.json')
+
+# 加载浏览器配置
+def load_browser_config():
+    global CUSTOM_BROWSER_PATH
+    try:
+        if os.path.exists(BROWSER_CONFIG_PATH):
+            with open(BROWSER_CONFIG_PATH, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                browser_path = config.get('browser_path', '')
+                if browser_path and os.path.exists(browser_path):
+                    CUSTOM_BROWSER_PATH = browser_path
+                    log_info(f"已加载自定义浏览器路径: {CUSTOM_BROWSER_PATH}")
+                    return True
+    except Exception as e:
+        log_warning(f"加载浏览器配置失败: {str(e)}")
+    return False
+
+# 尝试加载浏览器配置
+load_browser_config()
+
 # 优雅的HTML模板
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -154,9 +179,33 @@ HTML_TEMPLATE = """
 async def install_playwright_deps():
     """安装Playwright依赖"""
     try:
-        log_info("正在安装Playwright浏览器依赖...")
+        log_info("检查Playwright浏览器依赖...")
+        
+        # 如果设置了自定义路径，直接使用
+        global CUSTOM_BROWSER_PATH
+        if CUSTOM_BROWSER_PATH and os.path.exists(CUSTOM_BROWSER_PATH):
+            log_info(f"使用自定义浏览器路径: {CUSTOM_BROWSER_PATH}")
+            return True
+        
+        # 检查是否已经有浏览器安装
+        home_dir = os.path.expanduser("~")
+        browser_path = os.path.join(home_dir, ".cache", "ms-playwright")
+        
+        # 如果浏览器目录存在，检查是否已有Chromium
+        if os.path.exists(browser_path):
+            chromium_dirs = [d for d in os.listdir(browser_path) if d.startswith("chromium-")]
+            if chromium_dirs:
+                log_info(f"找到已安装的Chromium: {chromium_dirs}")
+                return True
+        
+        # 如果没有找到浏览器，尝试安装
+        log_info("未找到已安装的Chromium，尝试安装...")
+        
+        # 设置环境变量，跳过浏览器下载（如果已手动放置）
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = browser_path
+        
         process = await asyncio.create_subprocess_shell(
-            "playwright install chromium",
+            "playwright install chromium --force",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
@@ -166,7 +215,14 @@ async def install_playwright_deps():
             log_info("Playwright依赖安装成功")
             return True
         else:
-            log_error_msg(f"Playwright依赖安装失败: {stderr.decode()}")
+            # 安装失败，查看是否已手动解压
+            if os.path.exists(browser_path):
+                chromium_dirs = [d for d in os.listdir(browser_path) if d.startswith("chromium-")]
+                if chromium_dirs:
+                    log_info(f"找到手动安装的Chromium: {chromium_dirs}")
+                    return True
+            
+            log_error_msg(f"Playwright依赖安装失败: {stderr.decode() if stderr else '未知错误'}")
             return False
     except Exception as e:
         log_error_msg(f"安装Playwright依赖时出错: {str(e)}")
@@ -286,7 +342,13 @@ async def html_to_screenshot(html_path, output_path):
     try:
         log_info("使用Playwright将HTML转换为图片...")
         async with async_playwright() as p:
-            browser = await p.chromium.launch()
+            # 检查是否有自定义浏览器路径
+            if CUSTOM_BROWSER_PATH and os.path.exists(CUSTOM_BROWSER_PATH):
+                log_info(f"使用自定义Chromium: {CUSTOM_BROWSER_PATH}")
+                browser = await p.chromium.launch(executable_path=CUSTOM_BROWSER_PATH)
+            else:
+                browser = await p.chromium.launch()
+                
             page = await browser.new_page()
             
             # 加载HTML文件
@@ -314,8 +376,8 @@ async def init_playwright():
         return False
     
     try:
-        import playwright
-        log_info(f"Playwright版本: {playwright.__version__}")
+        # 不再尝试获取版本号，直接安装依赖
+        log_info("初始化Playwright并检查依赖...")
         await install_playwright_deps()
         return True
     except Exception as e:
