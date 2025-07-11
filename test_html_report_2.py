@@ -606,11 +606,11 @@ async def get_font_path():
 
 async def html_to_image(title, content, date_str):
     """
-    将内容转换为HTML，然后使用Playwright生成图片
+    生成HTML报告并转换为图片
     :param title: 标题
     :param content: 内容
     :param date_str: 日期字符串
-    :return: HTML文件路径和图片路径
+    :return: HTML文件路径和图片文件路径的元组
     """
     try:
         log_info("开始生成HTML并转换为图片...")
@@ -623,8 +623,11 @@ async def html_to_image(title, content, date_str):
         # 预处理内容，确保能被正确解析
         processed_content = preprocess_content(content)
         
+        # 转义内容中的大括号，防止格式化错误
+        processed_content = processed_content.replace("{", "{{").replace("}", "}}")
+        
         # 内容需要转义，供JavaScript处理
-        content_escaped = processed_content.replace('\\', '\\\\').replace('`', '\\`').replace('{', '{{').replace('}', '}}')
+        content_escaped = processed_content.replace('\\', '\\\\').replace('`', '\\`')
         
         # 生成完整的HTML
         html_content = HTML_TEMPLATE.format(
