@@ -36,11 +36,10 @@ from .logger_helper import log_debug, log_info, log_warning, log_error_msg, log_
 
 # 导入HTML图片日报功能
 from .test_html_report_2 import (
-    html_to_image, 
-    generate_text_report,
     init_playwright,
     get_font_path,
-    preprocess_content
+    preprocess_content,
+    html_to_screenshot
 )
 
 # 初始化Playwright（异步启动）
@@ -51,6 +50,115 @@ async def init_dailysum_playwright():
         log_info("Playwright初始化完成")
     else:
         log_warning("Playwright未安装，将使用文本方式发送日报")
+
+# 自定义HTML转图片函数
+async def html_to_image(title, content, date_str):
+    """
+    生成HTML报告并转换为图片
+    :param title: 标题
+    :param content: 内容
+    :param date_str: 日期字符串
+    :return: HTML文件路径和图片文件路径的元组
+    """
+    try:
+        log_info("开始生成HTML并转换为图片...")
+        
+        # 检查内容是否为空
+        if not content or not content.strip():
+            log_error_msg("内容为空，无法生成HTML")
+            return None, None
+        
+        # 获取字体路径
+        font_path = await get_font_path()
+        if not font_path:
+            log_warning("找不到可用的中文字体")
+        
+        # 预处理内容，确保能被正确解析
+        processed_content = preprocess_content(content)
+        
+        # 如果预处理失败，则使用文本方式生成报告
+        if not processed_content:
+            log_warning("预处理内容失败，使用文本方式生成报告")
+            return None, None
+        
+        # 转义内容中的大括号，防止格式化错误 - 更彻底的处理
+        processed_content = processed_content.replace("{", "{{").replace("}", "}}")
+        
+        # 内容需要转义，供JavaScript处理
+        content_escaped = processed_content.replace('\\', '\\\\').replace('`', '\\`')
+        
+        # 使用更安全的方式构建HTML内容，避免直接使用format
+        try:
+            # 尝试生成完整的HTML - 显式指定所有参数
+            log_info("使用黑色背景模板生成HTML...")
+            html_content = DARK_HTML_TEMPLATE.format(
+                title=title,
+                content_escaped=content_escaped,
+                date=date_str,
+                font_path=font_path
+            )
+        except KeyError as ke:
+            log_error_msg(f"格式化HTML时发生KeyError错误: {ke}")
+            log_error_msg(f"尝试的参数: title={title[:20]}..., date={date_str}, font_path={font_path}")
+            # 第二种尝试方法 - 手动替换
+            html_content = DARK_HTML_TEMPLATE
+            html_content = html_content.replace("{title}", title)
+            html_content = html_content.replace("{content_escaped}", content_escaped)
+            html_content = html_content.replace("{date}", date_str)
+            html_content = html_content.replace("{font_path}", font_path)
+            log_info("使用手动替换方法构建HTML成功")
+        
+        # 保存HTML文件
+        temp_html_path = os.path.join(DATA_DIR, f"report_{date_str}.html")
+        with open(temp_html_path, 'w', encoding='utf-8') as f:
+            f.write(html_content)
+        
+        log_info(f"HTML内容已保存到: {temp_html_path}")
+        
+        # 初始化Playwright
+        if not await init_playwright():
+            log_warning("初始化Playwright失败，无法生成图片")
+            return temp_html_path, None
+        
+        # HTML转换为图片
+        temp_img_path = os.path.join(DATA_DIR, f"report_{date_str}.png")
+        if await html_to_screenshot(os.path.abspath(temp_html_path), temp_img_path):
+            # 检查生成的图片文件是否合理
+            try:
+                if os.path.exists(temp_img_path):
+                    file_size = os.path.getsize(temp_img_path)
+                    if file_size < 5000:  # 小于5KB的图片可能是空白或错误
+                        log_warning(f"生成的图片大小异常: {file_size} 字节，可能是空白图片")
+                        return temp_html_path, None
+                    
+                    # 尝试用PIL打开检查图片是否有效
+                    from PIL import Image
+                    try:
+                        with Image.open(temp_img_path) as img:
+                            width, height = img.size
+                            if width < 100 or height < 100:
+                                log_warning(f"生成的图片尺寸异常: {width}x{height}，可能是无效图片")
+                                return temp_html_path, None
+                            log_info(f"图片检查成功: 大小 {file_size/1024:.2f} KB, 尺寸 {width}x{height}")
+                    except Exception as e:
+                        log_warning(f"图片验证失败: {str(e)}")
+                        return temp_html_path, None
+                    
+                    return temp_html_path, temp_img_path
+                else:
+                    log_warning("图片生成函数返回成功，但文件不存在")
+                    return temp_html_path, None
+            except Exception as e:
+                log_warning(f"验证图片时出错: {str(e)}")
+                return temp_html_path, None
+        else:
+            return temp_html_path, None
+    except Exception as e:
+        import traceback
+        error_msg = traceback.format_exc()
+        log_error_msg(f"HTML转图片过程中出错: {str(e)}")
+        log_error_msg(f"完整错误堆栈:\n{error_msg}")
+        return None, None
 
 # 确保data目录存在
 os.makedirs(DATA_DIR, exist_ok=True)
