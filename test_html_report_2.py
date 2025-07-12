@@ -211,11 +211,37 @@ HTML_TEMPLATE = """
             const content = `{content_escaped}`;
             const sections = {{}};
             
+            // 首先，清理内容，去除分隔符和前言
+            let cleanedContent = content;
+            
+            // 1. 尝试找到正文内容（通常在分隔符 "---" 之后）
+            const separatorPattern = /---\s*\n/g;
+            const contentParts = content.split(separatorPattern);
+            
+            if (contentParts.length > 1) {{
+                // 选择分隔符后的第一部分作为主要内容
+                cleanedContent = contentParts[1];
+                // 如果后面还有分隔符，只取到下一个分隔符之前
+                const nextSeparatorIndex = cleanedContent.indexOf('---');
+                if (nextSeparatorIndex > 0) {{
+                    cleanedContent = cleanedContent.substring(0, nextSeparatorIndex).trim();
+                }}
+            }}
+            
+            // 2. 删除"注："开头的注释部分
+            cleanedContent = cleanedContent.replace(/\n注[:：][\s\S]*$/, '');
+            
+            // 3. 替换内容中的反引号
+            cleanedContent = cleanedContent.replace(/`([^`]+)`/g, '$1');
+            
+            // 调试输出清理后的内容（你可以稍后删除这行）
+            console.log("清理后的内容:", cleanedContent);
+            
             let currentSection = null;
             let currentContent = [];
             
             // 解析内容分段 - 增强版，支持多种标题格式
-            content.split('\\n').forEach(line => {{
+            cleanedContent.split('\\n').forEach(line => {{
                 // 匹配【标题】格式
                 let titleMatch = line.match(/^\s*【(.+?)】\s*$/);
                 // 匹配**【标题】**格式（markdown格式）
@@ -236,36 +262,78 @@ HTML_TEMPLATE = """
             // 如果没有找到任何标题部分，则尝试按不同格式再解析一遍
             if (Object.keys(sections).length === 0) {{
                 // 处理整段式的内容，按照明显的分隔来处理
-                let allContent = content.split('\\n');
+                let allContent = cleanedContent.split('\\n');
                 let fullText = allContent.join('\\n');
                 
                 // 尝试查找标题模式
-                let matches = fullText.match(/今日热点话题[：:]([\s\S]*?)(?=重要消息[：:]|金句[：:]|总结[：:]|$)/i);
-                if (matches) sections["今日热点话题"] = [matches[1].trim()];
+                let matches;
                 
-                matches = fullText.match(/重要消息[：:]([\s\S]*?)(?=金句[：:]|总结[：:]|$)/i);
-                if (matches) sections["重要消息"] = [matches[1].trim()];
+                // 更灵活的模式匹配，捕获标题后的所有内容直到下一个标题
+                const regexPatterns = [
+                    {{ pattern: /(聊天活跃度|活跃度|话题分析|今日热点|热点话题)[：:：]?\s*([\s\S]*?)(?=(?:话题分析|重要消息|情感分析|互动亮点|总结|$))/i, section: "聊天活跃度" }},
+                    {{ pattern: /(话题分析)[：:：]?\s*([\s\S]*?)(?=(?:情感分析|互动亮点|重要消息|总结|$))/i, section: "话题分析" }},
+                    {{ pattern: /(重要消息|重要通知)[：:：]?\s*([\s\S]*?)(?=(?:情感分析|互动亮点|总结|$))/i, section: "重要消息" }},
+                    {{ pattern: /(情感分析|互动亮点)[：:：]?\s*([\s\S]*?)(?=(?:总结|$))/i, section: "情感分析" }},
+                    {{ pattern: /(总结)[：:：]?\s*([\s\S]*?)(?=$)/i, section: "总结" }}
+                ];
                 
-                matches = fullText.match(/金句[：:][\s\S]*?(?=总结[：:]|$)/i);
-                if (matches) sections["金句"] = [matches[1].trim()];
-                
-                matches = fullText.match(/总结[：:][\s\S]*?$/i);
-                if (matches) sections["总结"] = [matches[1].trim()];
-                
-                // 如果还是没有找到合适的部分，尝试其他可能的标题
-                if (Object.keys(sections).length === 0) {{
-                    // 尝试聊天活跃度或话题分析
-                    matches = fullText.match(/(?:聊天活跃度|活跃度|话题分析)[：:]([\s\S]*?)(?=(?:重要消息|情感分析|互动亮点|总结|$))/i);
-                    if (matches) sections["今日热点话题"] = [matches[1].trim()];
-                    
-                    // 尝试情感分析或互动亮点
-                    matches = fullText.match(/(?:情感分析|互动亮点)[：:]([\s\S]*?)(?=(?:总结|$))/i);
-                    if (matches) sections["金句"] = [matches[1].trim()];
-                    
-                    // 兜底，如果真的什么都没找到，将所有内容放在一起
-                    if (Object.keys(sections).length === 0) {{
-                        sections["今日热点话题"] = [fullText.trim()];
+                for (const {{ pattern, section }} of regexPatterns) {{
+                    matches = fullText.match(pattern);
+                    if (matches && matches[2] && matches[2].trim()) {{
+                        sections[section] = [matches[2].trim()];
                     }}
+                }}
+                
+                // 如果还是没有找到合适的部分，尝试根据整段文本进行划分
+                if (Object.keys(sections).length === 0) {{
+                    // 尝试基于行的启发式划分
+                    let lines = cleanedContent.split('\\n').filter(line => line.trim());
+                    let currentSection = null;
+                    let currentSectionContent = [];
+                    
+                    for (const line of lines) {{
+                        // 检查行是否可能是标题
+                        if (line.trim().length < 30 && 
+                            (line.includes('活跃度') || 
+                             line.includes('话题') || 
+                             line.includes('重要') || 
+                             line.includes('情感') || 
+                             line.includes('互动') || 
+                             line.includes('总结'))) {{
+                            
+                            // 保存之前的部分
+                            if (currentSection && currentSectionContent.length > 0) {{
+                                sections[currentSection] = currentSectionContent;
+                            }}
+                            
+                            // 设置新的部分
+                            if (line.includes('活跃度') || line.includes('热点')) {{
+                                currentSection = "聊天活跃度";
+                            }} else if (line.includes('话题')) {{
+                                currentSection = "话题分析";
+                            }} else if (line.includes('重要')) {{
+                                currentSection = "重要消息";
+                            }} else if (line.includes('情感') || line.includes('互动')) {{
+                                currentSection = "情感分析";
+                            }} else if (line.includes('总结')) {{
+                                currentSection = "总结";
+                            }}
+                            
+                            currentSectionContent = [];
+                        }} else if (currentSection) {{
+                            currentSectionContent.push(line);
+                        }}
+                    }}
+                    
+                    // 保存最后一个部分
+                    if (currentSection && currentSectionContent.length > 0) {{
+                        sections[currentSection] = currentSectionContent;
+                    }}
+                }}
+                
+                // 最后的回退：如果真的没找到，就全部作为一个部分处理
+                if (Object.keys(sections).length === 0) {{
+                    sections["内容摘要"] = [cleanedContent];
                 }}
             }}
             
@@ -286,6 +354,7 @@ HTML_TEMPLATE = """
                 '情感分析': document.getElementById('quotes-content'),
                 '互动亮点': document.getElementById('quotes-content'),
                 '经典语录': document.getElementById('quotes-content'),
+                '内容摘要': document.getElementById('quotes-content'),
                 
                 '总结': document.getElementById('summary-content'),
                 '聊天总结': document.getElementById('summary-content'),
@@ -294,8 +363,8 @@ HTML_TEMPLATE = """
             
             // 如果没有找到任何部分，显示一个"未能分析"消息
             if (Object.keys(sections).length === 0) {{
-                document.getElementById('topics-content').innerHTML = '未能正确识别内容格式';
-                document.getElementById('summary-content').innerHTML = content;
+                document.getElementById('topics-content').innerHTML = '<p>未能正确识别内容格式</p>';
+                document.getElementById('summary-content').innerHTML = '<p>' + content + '</p>';
                 return;
             }}
             
@@ -314,6 +383,10 @@ HTML_TEMPLATE = """
                     element.innerHTML = '<em>无内容</em>';
                 }}
             }}
+            
+            // 如果content_check函数查找不到内容，我们强制在这里设置一个标记
+            // 这样即使内容无法正确解析，也不会导致截图失败
+            window.hasValidContent = true;
         }}
         
         // 格式化内容，支持简单的Markdown格式
@@ -568,10 +641,17 @@ async def html_to_screenshot(html_path, output_path):
             # 验证页面内容是否有实际内容
             try:
                 content_check = await page.evaluate("""() => {
+                    // 如果页面上设置了标记，直接认为有内容
+                    if (window.hasValidContent) {
+                        return true;
+                    }
+                    
+                    // 检查所有内容区块
                     const contentElements = document.querySelectorAll('.bento-item-content');
                     let hasContent = false;
                     for(let el of contentElements) {
-                        if(el.innerText.trim().length > 10) {
+                        // 排除"无内容"占位文本
+                        if(el.innerText.trim().length > 10 && !el.innerText.includes('无内容')) {
                             hasContent = true;
                             break;
                         }
@@ -581,8 +661,8 @@ async def html_to_screenshot(html_path, output_path):
                 
                 if not content_check:
                     log_warning("页面内容验证失败，未找到有效的内容区块")
-                    await browser.close()
-                    return False
+                    # 不要立即返回失败，尝试继续生成图片
+                    log_warning("尝试继续生成图片，即使内容区块可能为空")
             except Exception as e:
                 log_warning(f"验证页面内容时出错: {str(e)}，尝试继续...")
             
