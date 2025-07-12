@@ -648,27 +648,67 @@ async def generate_image_summary(title, content, date_str):
             log_warning("内容为空，无法生成图片摘要")
             return None
         
+        # 记录原始内容前100个字符，用于调试
+        log_debug(f"原始内容前100字符: {content[:100].replace('\n', ' ')}...")
+        
         # 优先使用传统HTML转图片功能
         if PLAYWRIGHT_AVAILABLE:
             log_info("使用HTML转图片功能生成日报...")
-            html_path, image_path = await html_to_image(title, content, date_str)
             
+            # 增加超时处理
+            try:
+                html_path, image_path = await asyncio.wait_for(
+                    html_to_image(title, content, date_str), 
+                    timeout=60.0  # 60秒超时
+                )
+            except asyncio.TimeoutError:
+                log_warning("生成HTML图片超时(60秒)，将使用文本方式发送")
+                return None
+            except Exception as e:
+                log_warning(f"生成HTML图片时发生异常: {str(e)}")
+                return None
+            
+            log_info(f"HTML路径: {html_path}, 图片路径: {image_path}")
+            
+            if not html_path:
+                log_warning("HTML路径为空，预处理内容可能失败")
+                return None
+                
             if image_path and os.path.exists(image_path):
                 # 检查图片文件大小，确保不是空白图片
                 file_size = os.path.getsize(image_path)
+                log_info(f"生成图片大小: {file_size} 字节")
+                
                 if file_size < 5000:  # 小于5KB的图片可能是空白或错误
                     log_warning(f"生成的图片大小异常: {file_size} 字节，可能是空白图片")
                     return None
                 
                 # 读取图片数据
-                with open(image_path, 'rb') as f:
-                    image_data = f.read()
+                try:
+                    with open(image_path, 'rb') as f:
+                        image_data = f.read()
+                except Exception as e:
+                    log_warning(f"读取图片文件失败: {str(e)}")
+                    return None
                 
                 if len(image_data) < 1000:  # 另一个检查点，确保数据不为空
                     log_warning(f"图片数据异常小: {len(image_data)} 字节")
                     return None
                     
                 log_info(f"图片生成成功，大小: {len(image_data) / 1024:.2f} KB")
+                
+                # 尝试打开图片验证是否有效
+                try:
+                    from PIL import Image
+                    with Image.open(io.BytesIO(image_data)) as img:
+                        width, height = img.size
+                        log_info(f"图片有效，尺寸: {width}x{height}")
+                        if width < 100 or height < 100:
+                            log_warning(f"图片尺寸过小: {width}x{height}，可能无效")
+                            return None
+                except Exception as e:
+                    log_warning(f"图片验证失败: {str(e)}")
+                    # 我们仍然继续，因为有些环境可能没有PIL库
                 
                 # 清理临时文件
                 try:
@@ -680,7 +720,10 @@ async def generate_image_summary(title, content, date_str):
                 
                 return image_data
             else:
-                log_warning("HTML图片生成失败，将使用文本报告")
+                if html_path:
+                    log_warning("HTML文件生成成功，但图片生成失败")
+                else:
+                    log_warning("HTML和图片均生成失败")
                 return None
         else:
             log_warning("Playwright未安装，无法生成HTML图片")

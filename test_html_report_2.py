@@ -246,100 +246,130 @@ HTML_TEMPLATE = """
                 matches = fullText.match(/重要消息[：:]([\s\S]*?)(?=金句[：:]|总结[：:]|$)/i);
                 if (matches) sections["重要消息"] = [matches[1].trim()];
                 
-                matches = fullText.match(/金句[：:]([\s\S]*?)(?=总结[：:]|$)/i);
+                matches = fullText.match(/金句[：:][\s\S]*?(?=总结[：:]|$)/i);
                 if (matches) sections["金句"] = [matches[1].trim()];
                 
-                matches = fullText.match(/总结[：:]([\s\S]*)/i);
+                matches = fullText.match(/总结[：:][\s\S]*?$/i);
                 if (matches) sections["总结"] = [matches[1].trim()];
                 
-                // 如果仍然没有找到任何标题，把整个内容作为摘要
+                // 如果还是没有找到合适的部分，尝试其他可能的标题
                 if (Object.keys(sections).length === 0) {{
-                    sections["聊天摘要"] = [content];
+                    // 尝试聊天活跃度或话题分析
+                    matches = fullText.match(/(?:聊天活跃度|活跃度|话题分析)[：:]([\s\S]*?)(?=(?:重要消息|情感分析|互动亮点|总结|$))/i);
+                    if (matches) sections["今日热点话题"] = [matches[1].trim()];
+                    
+                    // 尝试情感分析或互动亮点
+                    matches = fullText.match(/(?:情感分析|互动亮点)[：:]([\s\S]*?)(?=(?:总结|$))/i);
+                    if (matches) sections["金句"] = [matches[1].trim()];
+                    
+                    // 兜底，如果真的什么都没找到，将所有内容放在一起
+                    if (Object.keys(sections).length === 0) {{
+                        sections["今日热点话题"] = [fullText.trim()];
+                    }}
                 }}
             }}
             
-            // 映射标题到HTML元素ID
-            const mappings = {{
-                '今日热点话题': 'topics-content',
-                '热点话题': 'topics-content',
-                '今日话题': 'topics-content',
-                '重要消息': 'important-content',
-                '金句': 'quotes-content',
-                '总结': 'summary-content',
-                '今日总结': 'summary-content',
-                '聊天摘要': 'topics-content',
-                '聊天活跃度': 'topics-content',
-                '话题分析': 'topics-content',
-                '情感分析': 'important-content',
-                '互动亮点': 'quotes-content'
+            // 处理内容分发 - 支持更灵活的标题映射
+            const contentMapping = {{
+                '今日热点话题': document.getElementById('topics-content'),
+                '热点话题': document.getElementById('topics-content'),
+                '活跃度': document.getElementById('topics-content'),
+                '聊天活跃度': document.getElementById('topics-content'),
+                '话题分析': document.getElementById('topics-content'),
+                
+                '重要消息': document.getElementById('important-content'),
+                '重要通知': document.getElementById('important-content'),
+                '重要事项': document.getElementById('important-content'),
+                
+                '金句': document.getElementById('quotes-content'),
+                '精彩发言': document.getElementById('quotes-content'),
+                '情感分析': document.getElementById('quotes-content'),
+                '互动亮点': document.getElementById('quotes-content'),
+                '经典语录': document.getElementById('quotes-content'),
+                
+                '总结': document.getElementById('summary-content'),
+                '聊天总结': document.getElementById('summary-content'),
+                '日报总结': document.getElementById('summary-content')
             }};
             
-            // 填充各区块内容
-            Object.entries(sections).forEach(([section, lines]) => {{
-                const elementId = mappings[section] || 'topics-content';  // 默认放到话题区块
-                let element = document.getElementById(elementId);
-                
+            // 如果没有找到任何部分，显示一个"未能分析"消息
+            if (Object.keys(sections).length === 0) {{
+                document.getElementById('topics-content').innerHTML = '未能正确识别内容格式';
+                document.getElementById('summary-content').innerHTML = content;
+                return;
+            }}
+            
+            // 填充内容到对应区块
+            for (let sectionName in sections) {{
+                const element = contentMapping[sectionName];
                 if (element) {{
-                    // 格式化内容为HTML
-                    let htmlContent = lines.join('\\n');
-                    
-                    // 处理列表
-                    // 将"1. "或"- "或"* "格式的行转换为HTML列表
-                    htmlContent = htmlContent.split('\\n').map(line => {{
-                        let trimmedLine = line.trim();
-                        if (trimmedLine.match(/^\d+\.\s/)) {{
-                            return '<li>' + trimmedLine.replace(/^\d+\.\s/, '') + '</li>';
-                        }} else if (trimmedLine.startsWith('- ')) {{
-                            return '<li>' + trimmedLine.substring(2) + '</li>';
-                        }} else if (trimmedLine.startsWith('* ')) {{
-                            return '<li>' + trimmedLine.substring(2) + '</li>';
-                        }} else if (trimmedLine.startsWith('• ')) {{
-                            return '<li>' + trimmedLine.substring(2) + '</li>';
-                        }} else {{
-                            return line;
-                        }}
-                    }}).join('\\n');
-                    
-                    // 将连续的<li>标签包装在<ul>中
-                    let inList = false;
-                    htmlContent = htmlContent.split('\\n').map(line => {{
-                        if (line.trim().startsWith('<li>')) {{
-                            if (!inList) {{
-                                inList = true;
-                                return '<ul>' + line;
-                            }}
-                            return line;
-                        }} else {{
-                            if (inList) {{
-                                inList = false;
-                                return '</ul>' + line;
-                            }}
-                            return line;
-                        }}
-                    }}).join('\\n');
-                    
-                    // 确保最后一个列表被正确关闭
-                    if (inList) {{
-                        htmlContent += '</ul>';
-                    }}
-                    
-                    // 处理段落，使内容更易读
-                    htmlContent = htmlContent.replace(/\\n{2,}/g, '</p><p>');
-                    htmlContent = '<p>' + htmlContent + '</p>';
-                    htmlContent = htmlContent.replace(/<p>\\s*<\/p>/g, '');
-                    
-                    // 高亮关键词（在总结部分）
-                    if (elementId === 'summary-content') {{
-                        htmlContent = htmlContent.replace(/(重要|关键|值得注意|热点|关注)/g, '<span class="highlight">$1</span>');
-                    }}
-                    
-                    element.innerHTML = htmlContent;
+                    element.innerHTML = formatContent(sections[sectionName].join('\\n\\n'));
                 }}
-            }});
+            }}
+            
+            // 检查并填充空白区块
+            for (const elementId of ['topics-content', 'important-content', 'quotes-content', 'summary-content']) {{
+                const element = document.getElementById(elementId);
+                if (!element.innerHTML.trim()) {{
+                    element.innerHTML = '<em>无内容</em>';
+                }}
+            }}
         }}
         
-        // 页面加载后执行填充
-        window.onload = fillContent;
+        // 格式化内容，支持简单的Markdown格式
+        function formatContent(text) {{
+            if (!text) return '<em>无内容</em>';
+            
+            // 转换Markdown风格的列表
+            let html = text.replace(/^\s*[-*•]\s+(.+?)$/gm, '<li>$1</li>')
+                           .replace(/^\s*(\d+)[.)、]\s+(.+?)$/gm, '<li>$2</li>');
+            
+            // 将连续的<li>元素包裹在<ul>中
+            let parts = html.split(/(<li>.*?<\/li>)/g);
+            let result = '';
+            let inList = false;
+            
+            for (let part of parts) {{
+                if (part.startsWith('<li>')) {{
+                    if (!inList) {{
+                        result += '<ul>';
+                        inList = true;
+                    }}
+                    result += part;
+                }} else {{
+                    if (inList) {{
+                        result += '</ul>';
+                        inList = false;
+                    }}
+                    // 处理普通段落
+                    if (part.trim()) {{
+                        // 分割成段落
+                        const paragraphs = part.split(/\n\s*\n/);
+                        for (let p of paragraphs) {{
+                            if (p.trim()) {{
+                                result += '<p>' + p.trim() + '</p>';
+                            }}
+                        }}
+                    }}
+                }}
+            }}
+            
+            if (inList) {{
+                result += '</ul>';
+            }}
+            
+            // 如果没有添加任何HTML标签，则作为单个段落处理
+            if (!result.includes('<')) {{
+                result = '<p>' + text + '</p>';
+            }}
+            
+            return result;
+        }}
+        
+        // 页面加载后执行
+        window.onload = function() {{
+            fillContent();
+        }};
     </script>
 </body>
 </html>
@@ -768,121 +798,196 @@ def preprocess_content(content):
     # 如果内容为空，直接返回None表示无法处理
     if not content or not content.strip():
         return None
-        
-    # 检查是否已经有标准格式的分段
-    has_standard_sections = False
-    for section in ["【今日热点话题】", "【热点话题】", "【今日话题】", "【重要消息】", "【金句】", "【总结】"]:
-        if section in content:
-            has_standard_sections = True
-            break
     
-    if has_standard_sections:
-        return content
+    # 清理分隔符和特殊格式
+    # 移除分隔线如 "---"
+    content = re.sub(r'\n-{3,}\n', '\n\n', content)
+    # 移除注释部分
+    content = re.sub(r'\n注[:：].*?$', '', content, flags=re.MULTILINE)
+    
+    # 标题映射表 - 将各种可能的标题格式统一
+    title_mappings = {
+        # 热点/活跃度
+        r'【今日热点话题】': "【今日热点话题】",
+        r'【热点话题】': "【今日热点话题】",
+        r'【今日话题】': "【今日热点话题】",
+        r'【聊天活跃度】': "【今日热点话题】",
+        r'【活跃度】': "【今日热点话题】",
+        r'【话题分析】': "【今日热点话题】",
+        r'【群聊热点】': "【今日热点话题】",
+        r'【主要话题】': "【今日热点话题】",
         
+        # 重要消息
+        r'【重要消息】': "【重要消息】",
+        r'【重要通知】': "【重要消息】",
+        r'【重要事项】': "【重要消息】",
+        r'【关键信息】': "【重要消息】",
+        r'【重点内容】': "【重要消息】",
+        
+        # 金句部分
+        r'【金句】': "【金句】",
+        r'【精彩发言】': "【金句】",
+        r'【经典语录】': "【金句】",
+        r'【情感分析】': "【金句】",
+        r'【互动亮点】': "【金句】",
+        r'【精彩语录】': "【金句】",
+        r'【群聊金句】': "【金句】",
+        r'【有趣发言】': "【金句】",
+        
+        # 总结部分
+        r'【总结】': "【总结】",
+        r'【聊天总结】': "【总结】",
+        r'【日报总结】': "【总结】",
+        r'【整体总结】': "【总结】",
+        r'【今日总结】': "【总结】"
+    }
+    
+    # 检查是否已经有标准化的标题格式
+    normalized_content = content
+    for original, standard in title_mappings.items():
+        if re.search(original, content, re.IGNORECASE):
+            normalized_content = re.sub(original, standard, normalized_content, flags=re.IGNORECASE)
+    
+    # 如果已经标准化了标题，则使用标准化后的内容
+    if "【今日热点话题】" in normalized_content and "【重要消息】" in normalized_content or \
+       "【今日热点话题】" in normalized_content and "【金句】" in normalized_content or \
+       "【今日热点话题】" in normalized_content and "【总结】" in normalized_content:
+        return normalized_content
+    
+    # 处理标记语法，去掉backticks和其他markdown标记
+    normalized_content = re.sub(r'`([^`]+)`', r'\1', normalized_content)
+    normalized_content = re.sub(r'\*\*([^*]+)\*\*', r'\1', normalized_content)
+    
     # 尝试从内容中提取各部分 - 使用更宽松的模式
     processed = ""
     
     # 改进的正则表达式，更灵活的匹配方式
     sections_patterns = [
         # 热点话题/活跃度部分的多种可能表述
-        (r'(今日热点话题|热点话题|今日话题|主要话题|群聊热点|讨论热点|活跃度|聊天主题)[：:：]?\s*([\s\S]*?)(?=(重要消息|重要通知|重要事项|金句|精彩发言|经典语录|总结|聊天总结|日报总结|$))', "【今日热点话题】"),
+        (r'(?:今日热点话题|热点话题|今日话题|主要话题|群聊热点|讨论热点|活跃度|聊天主题|聊天活跃度|话题分析)[：:：]?\s*([\s\S]*?)(?=(?:重要消息|重要通知|重要事项|金句|精彩发言|经典语录|情感分析|互动亮点|总结|聊天总结|日报总结|$))', "【今日热点话题】"),
         
         # 重要消息部分的多种可能表述
-        (r'(重要消息|重要通知|重要事项|关键信息|重点内容)[：:：]?\s*([\s\S]*?)(?=(金句|精彩发言|经典语录|总结|聊天总结|日报总结|$))', "【重要消息】"),
+        (r'(?:重要消息|重要通知|重要事项|关键信息|重点内容)[：:：]?\s*([\s\S]*?)(?=(?:金句|精彩发言|经典语录|情感分析|互动亮点|总结|聊天总结|日报总结|$))', "【重要消息】"),
         
         # 金句部分的多种可能表述
-        (r'(金句|精彩发言|经典语录|精彩语录|群聊金句|有趣发言)[：:：]?\s*([\s\S]*?)(?=(总结|聊天总结|日报总结|$))', "【金句】"),
+        (r'(?:金句|精彩发言|经典语录|精彩语录|群聊金句|有趣发言|情感分析|互动亮点)[：:：]?\s*([\s\S]*?)(?=(?:总结|聊天总结|日报总结|$))', "【金句】"),
         
         # 总结部分的多种可能表述
-        (r'(总结|聊天总结|日报总结|整体总结|今日总结)[：:：]?\s*([\s\S]*)', "【总结】"),
+        (r'(?:总结|聊天总结|日报总结|整体总结|今日总结)[：:：]?\s*([\s\S]*)', "【总结】"),
     ]
     
     # 应用所有正则表达式进行匹配
     section_contents = {}
     for pattern, section_title in sections_patterns:
-        match = re.search(pattern, content, re.IGNORECASE | re.MULTILINE)
-        if match:
-            # 使用组索引2来获取内容部分，组索引1是标题
-            section_content = match.group(2).strip()
+        matches = re.finditer(pattern, content, re.IGNORECASE | re.MULTILINE)
+        for match in matches:
+            # 在新的正则表达式中，内容在组索引1
+            section_content = match.group(1).strip()
             if section_content:
                 section_contents[section_title] = section_content
+                break  # 只取第一个匹配的内容
     
     # 构建格式化内容
     for section_title in ["【今日热点话题】", "【重要消息】", "【金句】", "【总结】"]:
         if section_title in section_contents:
             processed += f"{section_title}\n{section_contents[section_title]}\n\n"
     
-    # 如果至少找到两个部分，则认为处理成功
-    if processed and len(section_contents) >= 2:
+    # 如果至少找到一个部分，则认为处理成功（条件放宽）
+    if processed and len(section_contents) >= 1:
         return processed
     
     # 尝试使用结构化分析 - 基于行的分析
     lines = content.split('\n')
     
-    # 跳过可能的标题行
+    # 跳过可能的标题行和分隔符行
     start_idx = 0
-    for i in range(min(5, len(lines))):
-        if not lines[i].strip() or "日报" in lines[i] or "群聊" in lines[i] or "总结" in lines[i].lower():
+    for i in range(min(10, len(lines))):  # 扩大搜索范围
+        if not lines[i].strip() or "日报" in lines[i] or "群聊" in lines[i] or "总结" in lines[i].lower() or lines[i].strip() == '---':
             start_idx = i + 1
+            continue
+        # 如果找到了标题形式的行，从这里开始
+        if re.search(r'^[-•*] ', lines[i].strip()) or re.search(r'^\d+[\.\)、]', lines[i].strip()):
+            break
     
-    # 尝试基于行号和内容特征进行分段
+    # 更智能的分段：识别标题行和列表开始
     chunks = []
     current_chunk = []
-    chunk_start_keywords = ['活跃', '热点', '话题', '主要', '重要', '关键', '金句', '发言', '语录', '总结']
+    current_title = ""
+    in_list = False
     
-    for line in lines[start_idx:]:
+    for i, line in enumerate(lines[start_idx:]):
         line_stripped = line.strip()
         
-        # 检查是否为可能的段落开始
-        if line_stripped and any(keyword in line_stripped for keyword in chunk_start_keywords) and (
-            line_stripped.endswith(':') or line_stripped.endswith('：') or 
-            line_stripped.startswith('**') or line_stripped.startswith('#') or
-            re.match(r'^\d+[\.\)、]', line_stripped)
-        ):
-            if current_chunk:
-                chunks.append('\n'.join(current_chunk))
-                current_chunk = []
+        # 跳过空行
+        if not line_stripped:
+            continue
         
-        if line_stripped:
-            current_chunk.append(line)
+        # 检测标题行（以"-"开头的列表项不算标题）
+        if not line_stripped.startswith('-') and not line_stripped.startswith('•') and not line_stripped.startswith('*') and not re.match(r'^\d+[\.\)、]', line_stripped):
+            is_title = False
+            
+            # 检查是否是标题行
+            for keyword in ['活跃', '热点', '话题', '主要', '重要', '关键', '金句', '发言', '语录', '总结', '情感', '互动', '亮点']:
+                if keyword in line_stripped.lower():
+                    is_title = True
+                    break
+            
+            if is_title:
+                # 保存之前的块
+                if current_chunk:
+                    if current_title:
+                        title_content = current_title + "\n" + "\n".join(current_chunk)
+                    else:
+                        title_content = "\n".join(current_chunk)
+                    chunks.append(title_content)
+                    current_chunk = []
+                
+                current_title = line_stripped
+                continue
+        
+        # 将行添加到当前块
+        current_chunk.append(line_stripped)
     
+    # 添加最后一个块
     if current_chunk:
-        chunks.append('\n'.join(current_chunk))
+        if current_title:
+            title_content = current_title + "\n" + "\n".join(current_chunk)
+        else:
+            title_content = "\n".join(current_chunk)
+        chunks.append(title_content)
     
-    # 如果能够分割出足够的块，尝试构建标准格式
-    if len(chunks) >= 3:
-        # 基于位置和特征分配到对应部分
-        section_mapping = {}
+    # 如果能够分割出块，尝试构建标准格式
+    if len(chunks) >= 1:
+        # 映射块到标准部分
+        standard_sections = ["【今日热点话题】", "【重要消息】", "【金句】", "【总结】"]
+        mapped_sections = {}
         
-        # 从第一个块中判断是否是热点话题
-        if any(keyword in chunks[0].lower() for keyword in ['活跃', '热点', '话题', '主要', '讨论']):
-            section_mapping["【今日热点话题】"] = chunks[0]
+        # 根据内容特征进行映射
+        for chunk in chunks:
+            chunk_lower = chunk.lower()
+            
+            if any(keyword in chunk_lower for keyword in ['活跃度', '热点', '话题分析', '今日话题']):
+                mapped_sections["【今日热点话题】"] = chunk
+            elif any(keyword in chunk_lower for keyword in ['重要消息', '通知', '事项']):
+                mapped_sections["【重要消息】"] = chunk
+            elif any(keyword in chunk_lower for keyword in ['金句', '发言', '情感', '互动', '亮点']):
+                mapped_sections["【金句】"] = chunk
+            elif any(keyword in chunk_lower for keyword in ['总结', '总体']):
+                mapped_sections["【总结】"] = chunk
+            else:
+                # 如果无法分类，根据位置进行分配
+                for i, section in enumerate(standard_sections):
+                    if section not in mapped_sections and i < len(chunks):
+                        mapped_sections[section] = chunk
+                        break
         
-        # 从剩余块中查找重要消息、金句和总结
-        remaining_chunks = [c for i, c in enumerate(chunks) if i not in [0] or i >= len(section_mapping)]
-        
-        for chunk in remaining_chunks:
-            if "重要" in chunk.lower() or "通知" in chunk.lower() and "【重要消息】" not in section_mapping:
-                section_mapping["【重要消息】"] = chunk
-            elif "金句" in chunk.lower() or "语录" in chunk.lower() or "发言" in chunk.lower() and "【金句】" not in section_mapping:
-                section_mapping["【金句】"] = chunk
-            elif "总结" in chunk.lower() or "总体" in chunk.lower() and "【总结】" not in section_mapping:
-                section_mapping["【总结】"] = chunk
-        
-        # 如果没有成功映射所有部分，根据位置进行分配
-        sections = ["【今日热点话题】", "【重要消息】", "【金句】", "【总结】"]
-        for i, section in enumerate(sections):
-            if section not in section_mapping and i < len(chunks):
-                section_mapping[section] = chunks[i]
-        
-        # 构建最终处理后的内容
+        # 构建最终格式
         processed = ""
-        for section in sections:
-            if section in section_mapping:
-                processed += f"{section}\n{section_mapping[section].strip()}\n\n"
+        for section in standard_sections:
+            if section in mapped_sections:
+                processed += f"{section}\n{mapped_sections[section]}\n\n"
         
-        # 如果有至少三个部分，认为处理成功
-        if len(section_mapping) >= 3:
+        if processed:
             return processed
     
     # 最后的回退机制：创建一个单一的"聊天摘要"部分
