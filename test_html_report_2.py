@@ -521,26 +521,74 @@ async def html_to_screenshot(html_path, output_path):
             page = await browser.new_page()
             
             # 加载HTML文件
-            await page.goto(f"file://{html_path}")
+            try:
+                await page.goto(f"file://{html_path}", timeout=30000)  # 增加超时时间到30秒
+            except Exception as e:
+                log_error_msg(f"加载HTML文件失败: {str(e)}")
+                await browser.close()
+                return False
             
             # 等待内容加载
-            await page.wait_for_load_state("networkidle")
-            await page.wait_for_timeout(1000)  # 额外等待1秒确保JavaScript执行完毕
+            try:
+                await page.wait_for_load_state("networkidle", timeout=30000)
+                await page.wait_for_timeout(2000)  # 额外等待2秒确保JavaScript执行完毕
+            except Exception as e:
+                log_warning(f"等待页面加载时出错: {str(e)}，尝试继续...")
+            
+            # 验证页面内容是否有实际内容
+            try:
+                content_check = await page.evaluate("""() => {
+                    const contentElements = document.querySelectorAll('.bento-item-content');
+                    let hasContent = false;
+                    for(let el of contentElements) {
+                        if(el.innerText.trim().length > 10) {
+                            hasContent = true;
+                            break;
+                        }
+                    }
+                    return hasContent;
+                }""")
+                
+                if not content_check:
+                    log_warning("页面内容验证失败，未找到有效的内容区块")
+                    await browser.close()
+                    return False
+            except Exception as e:
+                log_warning(f"验证页面内容时出错: {str(e)}，尝试继续...")
+            
+            screenshot_success = False
             
             # 只截取报告容器部分，去掉周围的白边
-            container = await page.query_selector('.bento-container')
-            if container:
-                await container.screenshot(path=output_path)
-                log_info("成功截取Bento Grid容器部分")
-            else:
-                # 如果找不到容器，则截取整个页面
-                await page.screenshot(path=output_path, full_page=True)
-                log_info("未找到Bento容器，截取整个页面")
+            try:
+                container = await page.query_selector('.bento-container')
+                if container:
+                    await container.screenshot(path=output_path)
+                    log_info("成功截取Bento Grid容器部分")
+                    screenshot_success = True
+                else:
+                    # 如果找不到容器，则截取整个页面
+                    log_warning("未找到Bento容器，将尝试截取整个页面")
+            except Exception as e:
+                log_warning(f"截取容器时出错: {str(e)}，尝试截取整个页面...")
+            
+            # 如果容器截图失败，尝试截取整个页面
+            if not screenshot_success:
+                try:
+                    await page.screenshot(path=output_path, full_page=True)
+                    log_info("成功截取整个页面")
+                    screenshot_success = True
+                except Exception as e:
+                    log_error_msg(f"截取整个页面失败: {str(e)}")
+                    screenshot_success = False
             
             await browser.close()
             
-        log_info(f"HTML转图片成功，输出到: {output_path}")
-        return True
+        if screenshot_success and os.path.exists(output_path):
+            log_info(f"HTML转图片成功，输出到: {output_path}")
+            return True
+        else:
+            log_warning("HTML转图片失败，未能生成有效的图片文件")
+            return False
     except Exception as e:
         log_error_msg(f"HTML转图片失败: {str(e)}")
         log_error_msg(traceback.format_exc())
@@ -615,6 +663,11 @@ async def html_to_image(title, content, date_str):
     try:
         log_info("开始生成HTML并转换为图片...")
         
+        # 检查内容是否为空
+        if not content or not content.strip():
+            log_error_msg("内容为空，无法生成HTML")
+            return None, None
+        
         # 获取字体路径
         font_path = await get_font_path()
         if not font_path:
@@ -622,6 +675,11 @@ async def html_to_image(title, content, date_str):
         
         # 预处理内容，确保能被正确解析
         processed_content = preprocess_content(content)
+        
+        # 如果预处理失败，则使用文本方式生成报告
+        if not processed_content:
+            log_warning("预处理内容失败，使用文本方式生成报告")
+            return None, None
         
         # 转义内容中的大括号，防止格式化错误 - 更彻底的处理
         processed_content = processed_content.replace("{", "{{").replace("}", "}}")
@@ -664,7 +722,34 @@ async def html_to_image(title, content, date_str):
         # HTML转换为图片
         temp_img_path = os.path.join(DATA_DIR, f"report_{date_str}.png")
         if await html_to_screenshot(os.path.abspath(temp_html_path), temp_img_path):
-            return temp_html_path, temp_img_path
+            # 检查生成的图片文件是否合理
+            try:
+                if os.path.exists(temp_img_path):
+                    file_size = os.path.getsize(temp_img_path)
+                    if file_size < 5000:  # 小于5KB的图片可能是空白或错误
+                        log_warning(f"生成的图片大小异常: {file_size} 字节，可能是空白图片")
+                        return temp_html_path, None
+                    
+                    # 尝试用PIL打开检查图片是否有效
+                    from PIL import Image
+                    try:
+                        with Image.open(temp_img_path) as img:
+                            width, height = img.size
+                            if width < 100 or height < 100:
+                                log_warning(f"生成的图片尺寸异常: {width}x{height}，可能是无效图片")
+                                return temp_html_path, None
+                            log_info(f"图片检查成功: 大小 {file_size/1024:.2f} KB, 尺寸 {width}x{height}")
+                    except Exception as e:
+                        log_warning(f"图片验证失败: {str(e)}")
+                        return temp_html_path, None
+                    
+                    return temp_html_path, temp_img_path
+                else:
+                    log_warning("图片生成函数返回成功，但文件不存在")
+                    return temp_html_path, None
+            except Exception as e:
+                log_warning(f"验证图片时出错: {str(e)}")
+                return temp_html_path, None
         else:
             return temp_html_path, None
     except Exception as e:
@@ -678,66 +763,131 @@ def preprocess_content(content):
     """
     预处理内容，确保能被JavaScript正确解析
     :param content: 原始内容
-    :return: 处理后的内容
+    :return: 处理后的内容或None（表示无法解析，应使用文本方式）
     """
-    # 如果内容没有明确的【】分段，尝试进行格式化
-    if "【今日热点话题】" not in content and "【热点话题】" not in content and "【今日话题】" not in content:
-        # 尝试从内容中提取各部分
-        processed = ""
+    # 如果内容为空，直接返回None表示无法处理
+    if not content or not content.strip():
+        return None
         
-        # 提取聊天活跃度/热点话题
-        activity_match = re.search(r'(活跃度|热点话题|今日话题)[：:]?([\s\S]*?)(?=重要消息|金句|总结|$)', content, re.IGNORECASE)
-        if activity_match:
-            processed += "【今日热点话题】\n" + activity_match.group(2).strip() + "\n\n"
+    # 检查是否已经有标准格式的分段
+    has_standard_sections = False
+    for section in ["【今日热点话题】", "【热点话题】", "【今日话题】", "【重要消息】", "【金句】", "【总结】"]:
+        if section in content:
+            has_standard_sections = True
+            break
+    
+    if has_standard_sections:
+        return content
         
-        # 提取重要消息
-        topics_match = re.search(r'重要消息[：:]?([\s\S]*?)(?=金句|总结|$)', content, re.IGNORECASE)
-        if topics_match:
-            processed += "【重要消息】\n" + topics_match.group(1).strip() + "\n\n"
+    # 尝试从内容中提取各部分 - 使用更宽松的模式
+    processed = ""
+    
+    # 改进的正则表达式，更灵活的匹配方式
+    sections_patterns = [
+        # 热点话题/活跃度部分的多种可能表述
+        (r'(今日热点话题|热点话题|今日话题|主要话题|群聊热点|讨论热点|活跃度|聊天主题)[：:：]?\s*([\s\S]*?)(?=(重要消息|重要通知|重要事项|金句|精彩发言|经典语录|总结|聊天总结|日报总结|$))', "【今日热点话题】"),
         
-        # 提取金句
-        sentiment_match = re.search(r'金句[：:]?([\s\S]*?)(?=总结|$)', content, re.IGNORECASE)
-        if sentiment_match:
-            processed += "【金句】\n" + sentiment_match.group(1).strip() + "\n\n"
+        # 重要消息部分的多种可能表述
+        (r'(重要消息|重要通知|重要事项|关键信息|重点内容)[：:：]?\s*([\s\S]*?)(?=(金句|精彩发言|经典语录|总结|聊天总结|日报总结|$))', "【重要消息】"),
         
-        # 提取总结
-        summary_match = re.search(r'总结[：:]?([\s\S]*)', content, re.IGNORECASE)
-        if summary_match:
-            processed += "【总结】\n" + summary_match.group(1).strip() + "\n\n"
+        # 金句部分的多种可能表述
+        (r'(金句|精彩发言|经典语录|精彩语录|群聊金句|有趣发言)[：:：]?\s*([\s\S]*?)(?=(总结|聊天总结|日报总结|$))', "【金句】"),
         
-        # 如果仍然没有合适的分段，使用fallback方式分割内容
-        if not processed or "【" not in processed:
-            lines = content.split('\n')
-            # 跳过前两行（通常是标题和空行）
-            start_idx = 0
-            for i in range(min(3, len(lines))):
-                if "日报" in lines[i] or "字数" in lines[i] or not lines[i].strip():
-                    start_idx = i + 1
-            
-            # 强制分段
-            chunks = []
-            current_chunk = []
-            for line in lines[start_idx:]:
-                if line.strip() and (line.startswith('**') or line.strip().startswith('-')):
-                    if current_chunk:
-                        chunks.append('\n'.join(current_chunk))
-                        current_chunk = []
-                current_chunk.append(line)
-            
+        # 总结部分的多种可能表述
+        (r'(总结|聊天总结|日报总结|整体总结|今日总结)[：:：]?\s*([\s\S]*)', "【总结】"),
+    ]
+    
+    # 应用所有正则表达式进行匹配
+    section_contents = {}
+    for pattern, section_title in sections_patterns:
+        match = re.search(pattern, content, re.IGNORECASE | re.MULTILINE)
+        if match:
+            # 使用组索引2来获取内容部分，组索引1是标题
+            section_content = match.group(2).strip()
+            if section_content:
+                section_contents[section_title] = section_content
+    
+    # 构建格式化内容
+    for section_title in ["【今日热点话题】", "【重要消息】", "【金句】", "【总结】"]:
+        if section_title in section_contents:
+            processed += f"{section_title}\n{section_contents[section_title]}\n\n"
+    
+    # 如果至少找到两个部分，则认为处理成功
+    if processed and len(section_contents) >= 2:
+        return processed
+    
+    # 尝试使用结构化分析 - 基于行的分析
+    lines = content.split('\n')
+    
+    # 跳过可能的标题行
+    start_idx = 0
+    for i in range(min(5, len(lines))):
+        if not lines[i].strip() or "日报" in lines[i] or "群聊" in lines[i] or "总结" in lines[i].lower():
+            start_idx = i + 1
+    
+    # 尝试基于行号和内容特征进行分段
+    chunks = []
+    current_chunk = []
+    chunk_start_keywords = ['活跃', '热点', '话题', '主要', '重要', '关键', '金句', '发言', '语录', '总结']
+    
+    for line in lines[start_idx:]:
+        line_stripped = line.strip()
+        
+        # 检查是否为可能的段落开始
+        if line_stripped and any(keyword in line_stripped for keyword in chunk_start_keywords) and (
+            line_stripped.endswith(':') or line_stripped.endswith('：') or 
+            line_stripped.startswith('**') or line_stripped.startswith('#') or
+            re.match(r'^\d+[\.\)、]', line_stripped)
+        ):
             if current_chunk:
                 chunks.append('\n'.join(current_chunk))
-            
-            if len(chunks) >= 4:  # 尝试匹配我们的4个部分
-                processed = "【今日热点话题】\n" + chunks[0] + "\n\n"
-                processed += "【重要消息】\n" + chunks[1] + "\n\n"
-                processed += "【金句】\n" + chunks[2] + "\n\n"
-                processed += "【总结】\n" + '\n'.join(chunks[3:]) + "\n\n"
-            else:
-                # 最后的fallback：把所有内容放到一起
-                processed = "【聊天摘要】\n" + content
+                current_chunk = []
         
-        return processed
-    return content
+        if line_stripped:
+            current_chunk.append(line)
+    
+    if current_chunk:
+        chunks.append('\n'.join(current_chunk))
+    
+    # 如果能够分割出足够的块，尝试构建标准格式
+    if len(chunks) >= 3:
+        # 基于位置和特征分配到对应部分
+        section_mapping = {}
+        
+        # 从第一个块中判断是否是热点话题
+        if any(keyword in chunks[0].lower() for keyword in ['活跃', '热点', '话题', '主要', '讨论']):
+            section_mapping["【今日热点话题】"] = chunks[0]
+        
+        # 从剩余块中查找重要消息、金句和总结
+        remaining_chunks = [c for i, c in enumerate(chunks) if i not in [0] or i >= len(section_mapping)]
+        
+        for chunk in remaining_chunks:
+            if "重要" in chunk.lower() or "通知" in chunk.lower() and "【重要消息】" not in section_mapping:
+                section_mapping["【重要消息】"] = chunk
+            elif "金句" in chunk.lower() or "语录" in chunk.lower() or "发言" in chunk.lower() and "【金句】" not in section_mapping:
+                section_mapping["【金句】"] = chunk
+            elif "总结" in chunk.lower() or "总体" in chunk.lower() and "【总结】" not in section_mapping:
+                section_mapping["【总结】"] = chunk
+        
+        # 如果没有成功映射所有部分，根据位置进行分配
+        sections = ["【今日热点话题】", "【重要消息】", "【金句】", "【总结】"]
+        for i, section in enumerate(sections):
+            if section not in section_mapping and i < len(chunks):
+                section_mapping[section] = chunks[i]
+        
+        # 构建最终处理后的内容
+        processed = ""
+        for section in sections:
+            if section in section_mapping:
+                processed += f"{section}\n{section_mapping[section].strip()}\n\n"
+        
+        # 如果有至少三个部分，认为处理成功
+        if len(section_mapping) >= 3:
+            return processed
+    
+    # 最后的回退机制：创建一个单一的"聊天摘要"部分
+    processed = f"【聊天摘要】\n{content.strip()}"
+    return processed
 
 # 测试日报摘要文本
 TEST_SUMMARY = """【今日热点话题】
