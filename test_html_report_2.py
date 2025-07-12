@@ -206,311 +206,365 @@ HTML_TEMPLATE = """
     </div>
     
     <script>
-        // 分析内容并填充到对应区块
-        function fillContent() {{
+        // 全局状态管理
+        window.dailySumState = {
+            debugMode: true,
+            contentFound: false,
+            processingComplete: false,
+            sectionStatus: {
+                "today-topics": false,
+                "important-msgs": false,
+                "quotes": false,
+                "summary": false
+            },
+            log: function(msg, data) {
+                if (this.debugMode) {
+                    if (data) {
+                        console.log(`[日报解析] ${msg}`, data);
+                    } else {
+                        console.log(`[日报解析] ${msg}`);
+                    }
+                }
+            }
+        };
+
+        // 初始化函数 - 页面加载后调用
+        function initializeContent() {
+            window.dailySumState.log("开始解析日报内容...");
             const content = `{content_escaped}`;
             
-            // 调试输出原始内容
-            console.log("原始内容:", content);
+            // 执行内容提取
+            extractAndFillContent(content);
             
-            // 清理和规范化内容
+            // 标记处理完成
+            window.dailySumState.processingComplete = true;
+            window.hasValidContent = window.dailySumState.contentFound;
+            
+            // 调试信息
+            window.dailySumState.log("处理状态:", window.dailySumState);
+            window.dailySumState.log("内容提取完成. 有效内容:", window.dailySumState.contentFound);
+        }
+
+        // 主要提取函数
+        function extractAndFillContent(content) {
+            if (!content || content.trim() === '') {
+                window.dailySumState.log("内容为空，无法处理");
+                return;
+            }
+
+            window.dailySumState.log("原始内容长度:", content.length);
+            
+            // 清理内容
             let cleanedContent = content
                 .replace(/`([^`]+)`/g, '$1') // 移除反引号
+                .replace(/---/g, '')         // 移除分隔线
                 .trim();
-            
-            // 保存所有部分，使用简单的方法提取各部分
-            const sections = {{
-                "今日热点话题": [],
-                "重要消息": [],
-                "金句": [],
-                "总结": []
-            }};
-            
-            // 更简单的提取方法：查找关键标记然后提取内容
-            const patterns = [
-                // 活跃度/热点话题部分（对应到"今日热点话题"）
-                {{ 
-                    keywords: ["【聊天活跃度】", "【活跃度】", "【今日热点话题】", "【热点话题】", "【今日话题】", "【话题分析】"], 
-                    target: "今日热点话题" 
-                }},
-                // 重要消息部分
-                {{ 
-                    keywords: ["【重要消息】", "【重要通知】", "【重要事项】"], 
-                    target: "重要消息" 
-                }},
-                // 金句/情感分析部分
-                {{ 
-                    keywords: ["【金句】", "【精彩发言】", "【经典语录】", "【情感分析】", "【互动亮点】"], 
-                    target: "金句" 
-                }},
-                // 总结部分
-                {{ 
-                    keywords: ["【总结】", "【今日总结】", "【聊天总结】", "【日报总结】"], 
-                    target: "总结" 
-                }}
+
+            // 多种方法依次尝试提取内容
+            const extractionMethods = [
+                extractByExplicitSections,    // 方法1: 通过明确的章节标题提取
+                extractByTextPatterns,        // 方法2: 通过文本模式匹配提取
+                extractByContentSplitting,    // 方法3: 通过内容分割提取
+                createFromWholeText          // 方法4: 使用整个文本创建内容
             ];
+
+            // 依次尝试各种提取方法
+            for (const method of extractionMethods) {
+                try {
+                    window.dailySumState.log(`尝试使用提取方法: ${method.name}`);
+                    const sections = method(cleanedContent);
+                    
+                    // 如果提取成功，填充内容并结束
+                    if (fillContentSections(sections)) {
+                        window.dailySumState.log(`使用 ${method.name} 成功提取内容`);
+                        return;
+                    }
+                } catch (error) {
+                    window.dailySumState.log(`使用 ${method.name} 提取失败: ${error.message}`);
+                }
+            }
+
+            // 如果所有方法都失败，使用整个内容作为摘要
+            window.dailySumState.log("所有提取方法均失败，使用整个内容作为摘要");
+            fillEmergencyContent(cleanedContent);
+        }
+
+        // 方法1: 通过明确的章节标题提取
+        function extractByExplicitSections(text) {
+            const sections = {
+                "today-topics": [],
+                "important-msgs": [],
+                "quotes": [],
+                "summary": []
+            };
             
-            // 先尝试解析标题块格式（带【】的格式）
-            let lines = cleanedContent.split('\\n');
-            let currentTarget = null;
+            // 定义各种可能的节标题及其映射
+            const sectionKeywords = {
+                "today-topics": ["聊天活跃度", "活跃度", "今日热点话题", "热点话题", "今日话题", "话题分析", "群聊热点"],
+                "important-msgs": ["重要消息", "重要通知", "重要事项", "关键信息"],
+                "quotes": ["金句", "精彩发言", "经典语录", "情感分析", "互动亮点", "精彩语录"],
+                "summary": ["总结", "聊天总结", "日报总结", "整体总结", "今日总结"]
+            };
+
+            // 将文本分割成行
+            const lines = text.split('\n');
+            let currentSection = null;
             let currentContent = [];
             
-            // 设置标记，用于确认是否有有效内容
-            window.hasAnyContent = false;
-            
-            // 遍历每一行，提取内容
-            for (let line of lines) {{
-                line = line.trim();
-                if (!line) continue; // 跳过空行
+            // 遍历每行寻找节标题和内容
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
                 
-                // 检查是否是分隔符
-                if (line === '---') continue;
-                
-                // 检查是否是注释行
-                if (line.startsWith('注：') || line.startsWith('（注：')) continue;
-                
-                // 检查是否是标题行
-                let isTitle = false;
-                let targetSection = null;
-                
-                for (const pattern of patterns) {{
-                    for (const keyword of pattern.keywords) {{
-                        if (line.includes(keyword)) {{
-                            // 找到标题行
-                            isTitle = true;
-                            targetSection = pattern.target;
-                            
-                            // 记录当前正在处理的区块
-                            currentTarget = targetSection;
-                            currentContent = [];
-                            console.log("找到标题:", line, "对应区块:", targetSection);
+                // 检查是否是节标题
+                let matchedSection = null;
+                for (const [section, keywords] of Object.entries(sectionKeywords)) {
+                    for (const keyword of keywords) {
+                        // 寻找【关键词】格式或者以关键词开头的行
+                        if (line.includes(`【${keyword}】`) || line.startsWith(keyword)) {
+                            matchedSection = section;
                             break;
-                        }}
-                    }}
-                    if (isTitle) break;
-                }}
+                        }
+                    }
+                    if (matchedSection) break;
+                }
                 
-                // 如果不是标题行，且有当前目标，添加到当前内容
-                if (!isTitle && currentTarget) {{
+                // 如果找到新节，保存之前的内容并重置
+                if (matchedSection) {
+                    if (currentSection && currentContent.length > 0) {
+                        sections[currentSection] = sections[currentSection].concat(currentContent);
+                    }
+                    currentSection = matchedSection;
+                    currentContent = [];
+                } 
+                // 否则添加到当前节内容
+                else if (currentSection) {
                     currentContent.push(line);
-                }}
-                
-                // 如果遇到新标题或结束，保存当前内容
-                if ((isTitle || line === "---") && currentContent.length > 0) {{
-                    sections[currentTarget] = sections[currentTarget].concat(currentContent);
-                    window.hasAnyContent = true;
-                    console.log("保存内容到区块:", currentTarget, currentContent);
-                    if (!isTitle) {{
-                        currentContent = [];
-                    }}
-                }}
-            }}
+                }
+            }
             
-            // 保存最后一个部分
-            if (currentTarget && currentContent.length > 0) {{
-                sections[currentTarget] = sections[currentTarget].concat(currentContent);
-                window.hasAnyContent = true;
-                console.log("保存最后区块内容:", currentTarget, currentContent);
-            }}
+            // 处理最后一个节的内容
+            if (currentSection && currentContent.length > 0) {
+                sections[currentSection] = sections[currentSection].concat(currentContent);
+            }
             
-            // 如果第一种方法没有找到内容，尝试第二种方法
-            if (!window.hasAnyContent) {{
-                console.log("未通过标题标记解析到内容，尝试直接处理内部文本...");
-                
-                // 尝试在文本中直接查找关键部分
-                let fullText = cleanedContent;
-                
-                // 查找聊天活跃度/话题分析内容（对应到"今日热点话题"）
-                const activityMatches = fullText.match(/聊天活跃度|活跃度|话题分析[\s\S]*?((?=-|重要|情感|互动|总结)|$)/i);
-                if (activityMatches && activityMatches[0]) {{
-                    sections["今日热点话题"] = [activityMatches[0]];
-                    window.hasAnyContent = true;
-                    console.log("找到活跃度/话题内容");
-                }}
-                
-                // 查找重要消息
-                const importantMatches = fullText.match(/重要消息|重要通知[\s\S]*?((?=-|情感|互动|总结)|$)/i);
-                if (importantMatches && importantMatches[0]) {{
-                    sections["重要消息"] = [importantMatches[0]];
-                    window.hasAnyContent = true;
-                    console.log("找到重要消息内容");
-                }}
-                
-                // 查找情感分析/互动亮点（对应到"金句"）
-                const emotionMatches = fullText.match(/情感分析|互动亮点[\s\S]*?((?=-|总结)|$)/i);
-                if (emotionMatches && emotionMatches[0]) {{
-                    sections["金句"] = [emotionMatches[0]];
-                    window.hasAnyContent = true;
-                    console.log("找到情感/互动内容");
-                }}
-                
-                // 查找总结
-                const summaryMatches = fullText.match(/总结[\s\S]*?$/i);
-                if (summaryMatches && summaryMatches[0]) {{
-                    sections["总结"] = [summaryMatches[0]];
-                    window.hasAnyContent = true;
-                    console.log("找到总结内容");
-                }}
-                
-                // 如果找到了任何内容，重新组织它们
-                if (!window.hasAnyContent) {{
-                    console.log("未找到任何结构化内容，尝试提取项目符号列表...");
-                    
-                    // 尝试查找列表项（以-或数字开头的行）
-                    const listItems = cleanedContent.match(/(?:^|\n)[\s-]*[-•*][\s]*.+(?:\n|$)/g);
-                    if (listItems && listItems.length > 0) {{
-                        // 如果有足够的列表项，按比例分配到各个部分
-                        const totalItems = listItems.length;
-                        
-                        if (totalItems >= 4) {{
-                            const firstPart = Math.ceil(totalItems / 3);
-                            const secondPart = Math.ceil(totalItems / 3);
-                            
-                            sections["今日热点话题"] = listItems.slice(0, firstPart);
-                            sections["重要消息"] = listItems.slice(firstPart, firstPart + secondPart);
-                            sections["金句"] = listItems.slice(firstPart + secondPart);
-                            sections["总结"] = ["今日群内交流较少，主要围绕上述内容。"];
-                        }} else {{
-                            // 列表项较少，放在第一个部分
-                            sections["今日热点话题"] = listItems;
-                            sections["总结"] = ["今日群内交流较少，需要更多互动。"];
-                        }}
-                        window.hasAnyContent = true;
-                        console.log("提取到列表项:", listItems);
-                    }}
-                }}
-                
-                // 最后的回退：如果仍然没有内容，强制使用整个文本
-                if (!window.hasAnyContent) {{
-                    console.log("无法结构化提取内容，将整个文本作为摘要使用");
-                    sections["今日热点话题"] = [cleanedContent];
-                    window.hasAnyContent = true;
-                }}
-            }}
-            
-            // 填充内容到HTML
-            try {{
-                // 调试输出最终提取的内容
-                console.log("最终解析出的各部分内容:", JSON.stringify(sections));
-                
-                // 填充到对应区块
-                if (sections["今日热点话题"] && sections["今日热点话题"].length > 0) {{
-                    document.getElementById('topics-content').innerHTML = formatContent(sections["今日热点话题"].join('\\n'));
-                }}
-                
-                if (sections["重要消息"] && sections["重要消息"].length > 0) {{
-                    document.getElementById('important-content').innerHTML = formatContent(sections["重要消息"].join('\\n'));
-                }}
-                
-                if (sections["金句"] && sections["金句"].length > 0) {{
-                    document.getElementById('quotes-content').innerHTML = formatContent(sections["金句"].join('\\n'));
-                }}
-                
-                if (sections["总结"] && sections["总结"].length > 0) {{
-                    document.getElementById('summary-content').innerHTML = formatContent(sections["总结"].join('\\n'));
-                }}
-                
-                // 处理空白区块
-                ['topics-content', 'important-content', 'quotes-content', 'summary-content'].forEach(id => {{
-                    const element = document.getElementById(id);
-                    if (!element.innerHTML || element.innerHTML.trim() === '') {{
-                        element.innerHTML = '<em>无内容</em>';
-                    }}
-                }});
-                
-                // 设置全局标记，确保内容检测通过
-                window.hasValidContent = true;
-                
-                // 调试信息
-                console.log("内容填充完成");
-            }} catch (error) {{
-                console.error("填充内容时出错:", error);
-                // 确保错误不会阻止图片生成
-                window.hasValidContent = true;
-                
-                // 在错误情况下，确保至少有一些内容显示
-                document.getElementById('topics-content').innerHTML = "<p>解析内容时出错</p>";
-                document.getElementById('summary-content').innerHTML = "<p>" + cleanedContent + "</p>";
-            }}
-        }}
+            return sections;
+        }
         
-        // 格式化内容，支持简单的Markdown格式
-        function formatContent(text) {{
+        // 方法2: 通过文本模式匹配提取
+        function extractByTextPatterns(text) {
+            const sections = {
+                "today-topics": [],
+                "important-msgs": [],
+                "quotes": [],
+                "summary": []
+            };
+            
+            // 尝试匹配各种模式
+            const patterns = {
+                "today-topics": [/(聊天活跃度|活跃度|今日热点话题|热点话题|今日话题|话题分析)[\s\S]*?((?=重要消息|重要通知|金句|精彩发言|情感分析|互动亮点|总结|$))/i],
+                "important-msgs": [/(重要消息|重要通知|重要事项)[\s\S]*?((?=金句|精彩发言|情感分析|互动亮点|总结|$))/i],
+                "quotes": [/(金句|精彩发言|经典语录|情感分析|互动亮点)[\s\S]*?((?=总结|$))/i],
+                "summary": [/(总结|今日总结|聊天总结)[\s\S]*?$/i]
+            };
+            
+            // 对每个节应用模式
+            for (const [section, sectionPatterns] of Object.entries(patterns)) {
+                for (const pattern of sectionPatterns) {
+                    const match = text.match(pattern);
+                    if (match && match[0]) {
+                        const content = match[0].replace(new RegExp(match[1], 'i'), '').trim();
+                        if (content) {
+                            sections[section] = [content];
+                            window.dailySumState.log(`模式匹配提取到 ${section} 内容`);
+                        }
+                    }
+                }
+            }
+            
+            return sections;
+        }
+        
+        // 方法3: 通过内容分割提取
+        function extractByContentSplitting(text) {
+            const sections = {
+                "today-topics": [],
+                "important-msgs": [],
+                "quotes": [],
+                "summary": []
+            };
+            
+            // 提取项目符号列表（以-或•开头的行）
+            const listItems = text.match(/(?:^|\n)[\s]*[-•*][\s]+.+(?:\n|$)/g) || [];
+            
+            // 提取段落（非列表项的文本块）
+            const paragraphs = text
+                .split('\n')
+                .filter(line => line.trim() && !line.trim().match(/^[\s]*[-•*]/))
+                .map(line => line.trim());
+            
+            // 根据内容量分配到不同部分
+            if (listItems.length >= 3) {
+                // 如果有足够的列表项，分配给不同部分
+                const chunks = Math.ceil(listItems.length / 3);
+                sections["today-topics"] = listItems.slice(0, chunks);
+                sections["important-msgs"] = listItems.slice(chunks, chunks * 2);
+                sections["quotes"] = listItems.slice(chunks * 2);
+            } else if (paragraphs.length >= 3) {
+                // 如果有足够的段落，分配给不同部分
+                const chunks = Math.ceil(paragraphs.length / 3);
+                sections["today-topics"] = paragraphs.slice(0, chunks);
+                sections["important-msgs"] = paragraphs.slice(chunks, chunks * 2);
+                sections["quotes"] = paragraphs.slice(chunks * 2);
+            } else {
+                // 内容不足，尽量分配
+                if (listItems.length > 0) sections["today-topics"] = listItems;
+                if (paragraphs.length > 0) {
+                    sections["important-msgs"] = paragraphs.slice(0, Math.ceil(paragraphs.length / 2));
+                    sections["quotes"] = paragraphs.slice(Math.ceil(paragraphs.length / 2));
+                }
+            }
+            
+            // 总是添加一个总结
+            sections["summary"] = ["今日群聊内容已整理完毕。"];
+            
+            return sections;
+        }
+        
+        // 方法4: 使用整个文本创建内容
+        function createFromWholeText(text) {
+            return {
+                "today-topics": [text],
+                "important-msgs": ["请参考今日热点话题部分。"],
+                "quotes": ["内容较少，无法提取特定引言。"],
+                "summary": ["今日群聊内容较为简单，详见上方内容。"]
+            };
+        }
+        
+        // 紧急填充 - 当所有方法都失败时使用
+        function fillEmergencyContent(text) {
+            document.getElementById('topics-content').innerHTML = formatContent(text);
+            document.getElementById('important-content').innerHTML = "<p>内容解析失败，请查看第一部分</p>";
+            document.getElementById('quotes-content').innerHTML = "<p>内容解析失败，请查看第一部分</p>";
+            document.getElementById('summary-content').innerHTML = "<p>内容解析失败，请查看第一部分</p>";
+            
+            window.dailySumState.contentFound = true;
+            window.dailySumState.log("使用紧急填充方法");
+        }
+        
+        // 填充内容到各部分
+        function fillContentSections(sections) {
+            let hasContent = false;
+            
+            // 映射到HTML中的ID
+            const sectionToId = {
+                "today-topics": 'topics-content',
+                "important-msgs": 'important-content',
+                "quotes": 'quotes-content',
+                "summary": 'summary-content'
+            };
+            
+            // 填充各个部分
+            for (const [section, content] of Object.entries(sections)) {
+                if (content && content.length > 0) {
+                    const elementId = sectionToId[section];
+                    const element = document.getElementById(elementId);
+                    
+                    if (element) {
+                        element.innerHTML = formatContent(content.join('\n'));
+                        window.dailySumState.sectionStatus[section] = true;
+                        hasContent = true;
+                    }
+                }
+            }
+            
+            // 处理空白区块
+            for (const [section, id] of Object.entries(sectionToId)) {
+                const element = document.getElementById(id);
+                if (!element.innerHTML || element.innerHTML.trim() === '') {
+                    element.innerHTML = '<em>无内容</em>';
+                }
+            }
+            
+            window.dailySumState.contentFound = hasContent;
+            return hasContent;
+        }
+        
+        // 格式化内容
+        function formatContent(text) {
             if (!text || text.trim() === '') return '<em>无内容</em>';
             
-            // 处理列表
-            let html = text
-                // 处理带-、*或•的列表项
-                .replace(/^[\s-]*[-*•][\s]+(.+?)$/gm, '<li>$1</li>')
-                // 处理带数字的列表项
-                .replace(/^[\s-]*(\d+)[\.)、][\s]+(.+?)$/gm, '<li>$2</li>');
+            // 移除多余的【标题】标记
+            const cleanText = text
+                .replace(/【[^】]+】/g, '')
+                .replace(/^\s*[:-]\s*/gm, '')
+                .trim();
+                
+            if (!cleanText) return '<em>无内容</em>';
             
-            // 构建HTML结构
+            // 处理列表项
+            let formattedText = cleanText
+                // 处理以-、*或•开头的列表项
+                .replace(/^[\s]*[-*•][\s]+(.+?)$/gm, '<li>$1</li>')
+                // 处理以数字开头的列表项
+                .replace(/^[\s]*(\d+)[\.)、][\s]+(.+?)$/gm, '<li>$2</li>')
+                // 处理以-或其他字符开头但可能没有空格的情况
+                .replace(/^[\s]*[-](.+?)$/gm, '<li>$1</li>');
+            
+            // 构建HTML
             let result = '';
             let inList = false;
             
             // 分行处理
-            const lines = html.split('\\n');
-            for (let i = 0; i < lines.length; i++) {{
+            const lines = formattedText.split('\n');
+            for (let i = 0; i < lines.length; i++) {
                 const line = lines[i].trim();
-                
-                if (!line) {{
-                    // 空行，如果在列表中则结束列表
-                    if (inList) {{
+                if (!line) {
+                    // 空行，结束列表
+                    if (inList) {
                         result += '</ul>';
                         inList = false;
-                    }}
+                    }
                     continue;
-                }}
+                }
                 
-                if (line.startsWith('<li>')) {{
+                if (line.startsWith('<li>')) {
                     // 列表项
-                    if (!inList) {{
+                    if (!inList) {
                         result += '<ul>';
                         inList = true;
-                    }}
+                    }
                     result += line;
-                }} else {{
-                    // 普通文本
-                    if (inList) {{
+                } else {
+                    // 普通段落
+                    if (inList) {
                         result += '</ul>';
                         inList = false;
-                    }}
+                    }
                     
-                    // 如果文本不是HTML，则包装成段落
-                    if (!line.startsWith('<')) {{
-                        result += '<p>' + line + '</p>';
-                    }} else {{
-                        result += line;
-                    }}
-                }}
-            }}
+                    // 包装段落
+                    result += '<p>' + line + '</p>';
+                }
+            }
             
             // 关闭未闭合的列表
-            if (inList) {{
+            if (inList) {
                 result += '</ul>';
-            }}
+            }
             
-            // 如果没有生成任何HTML内容，则包装整个文本
-            if (!result.includes('<')) {{
-                result = '<p>' + text + '</p>';
-            }}
+            // 如果结果为空，返回原始文本
+            if (result.trim() === '') {
+                result = '<p>' + text.trim() + '</p>';
+            }
             
             return result;
-        }}
+        }
         
-        // 页面加载后执行
-        window.onload = function() {{
-            try {{
-                fillContent();
-            }} catch (error) {{
-                console.error("内容填充时发生错误:", error);
-                // 确保即使出错也设置有效标记
-                window.hasValidContent = true;
-                // 显示错误信息
-                document.getElementById('topics-content').innerHTML = "<p>处理内容时出错</p>";
-            }}
-        }};
+        // 在页面加载完成后执行初始化
+        document.addEventListener('DOMContentLoaded', initializeContent);
+        
+        // 立即执行一次，以防DOMContentLoaded已经触发
+        setTimeout(initializeContent, 100);
     </script>
 </body>
 </html>
@@ -691,8 +745,12 @@ async def html_to_screenshot(html_path, output_path):
                 
             page = await browser.new_page()
             
+            # 添加控制台消息监听
+            page.on("console", lambda msg: log_info(f"浏览器控制台: {msg.text}"))
+            
             # 加载HTML文件
             try:
+                log_info(f"正在加载HTML文件: {html_path}")
                 await page.goto(f"file://{html_path}", timeout=30000)  # 增加超时时间到30秒
             except Exception as e:
                 log_error_msg(f"加载HTML文件失败: {str(e)}")
@@ -701,40 +759,87 @@ async def html_to_screenshot(html_path, output_path):
             
             # 等待内容加载
             try:
+                log_info("等待页面网络空闲...")
                 await page.wait_for_load_state("networkidle", timeout=30000)
+                
                 # 增加等待时间，确保JavaScript完全执行
+                log_info("等待JavaScript执行...")
                 await page.wait_for_timeout(5000)  # 增加到5秒钟
+                
+                # 注入调试代码，帮助检测内容状态
+                await page.evaluate("""() => {
+                    if (!window.dailySumState) {
+                        console.log("警告: dailySumState未定义，可能JavaScript未正确执行");
+                        window.dailySumState = { contentFound: false, processingComplete: false };
+                    }
+                }""")
                 
                 # 等待JavaScript执行完成的标记
                 try:
-                    await page.wait_for_function("typeof window.hasValidContent !== 'undefined'", timeout=5000)
+                    log_info("等待JavaScript处理完成标记...")
+                    await page.wait_for_function("""() => {
+                        return window.dailySumState && window.dailySumState.processingComplete === true;
+                    }""", timeout=10000)  # 10秒超时
+                    
+                    log_info("JavaScript处理完成")
                 except Exception as e:
                     log_warning(f"等待JavaScript执行完成超时: {str(e)}")
+                    
+                    # 尝试检查内容状态
+                    content_status = await page.evaluate("""() => {
+                        if (window.dailySumState) {
+                            return {
+                                contentFound: window.dailySumState.contentFound,
+                                processingComplete: window.dailySumState.processingComplete,
+                                sectionStatus: window.dailySumState.sectionStatus || {}
+                            };
+                        }
+                        return { error: "dailySumState未定义" };
+                    }""")
+                    
+                    log_info(f"内容状态检查: {content_status}")
             except Exception as e:
                 log_warning(f"等待页面加载时出错: {str(e)}，尝试继续...")
             
             # 验证页面内容是否有实际内容
             try:
+                log_info("验证页面内容...")
                 content_check = await page.evaluate("""() => {
-                    // 如果页面上设置了标记，直接认为有内容
-                    if (window.hasValidContent) {
-                        return true;
+                    // 首先检查全局状态
+                    if (window.dailySumState && window.dailySumState.contentFound) {
+                        return { status: true, source: "dailySumState" };
                     }
                     
                     // 检查所有内容区块
                     const contentElements = document.querySelectorAll('.bento-item-content');
                     let hasContent = false;
+                    let contentSummary = {};
+                    
                     for(let el of contentElements) {
-                        // 排除"无内容"占位文本
-                        if(el.innerText.trim().length > 10 && !el.innerText.includes('无内容')) {
+                        const id = el.id;
+                        const text = el.innerText.trim();
+                        const hasValidContent = text.length > 10 && !text.includes('无内容');
+                        contentSummary[id] = {
+                            length: text.length,
+                            valid: hasValidContent,
+                            preview: text.substring(0, 20)
+                        };
+                        
+                        if (hasValidContent) {
                             hasContent = true;
-                            break;
                         }
                     }
-                    return hasContent;
+                    
+                    return { 
+                        status: hasContent, 
+                        source: "DOM检查",
+                        contentSummary: contentSummary
+                    };
                 }""")
                 
-                if not content_check:
+                log_info(f"内容验证结果: {content_check}")
+                
+                if not content_check.get('status', False):
                     log_warning("页面内容验证失败，未找到有效的内容区块")
                     # 不要立即返回失败，尝试继续生成图片
                     log_warning("尝试继续生成图片，即使内容区块可能为空")
@@ -745,6 +850,7 @@ async def html_to_screenshot(html_path, output_path):
             
             # 只截取报告容器部分，去掉周围的白边
             try:
+                log_info("尝试截取Bento容器部分...")
                 container = await page.query_selector('.bento-container')
                 if container:
                     await container.screenshot(path=output_path)
@@ -759,6 +865,7 @@ async def html_to_screenshot(html_path, output_path):
             # 如果容器截图失败，尝试截取整个页面
             if not screenshot_success:
                 try:
+                    log_info("尝试截取整个页面...")
                     await page.screenshot(path=output_path, full_page=True)
                     log_info("成功截取整个页面")
                     screenshot_success = True
