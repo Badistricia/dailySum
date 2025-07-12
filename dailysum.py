@@ -649,7 +649,8 @@ async def generate_image_summary(title, content, date_str):
             return None
         
         # 记录原始内容前100个字符，用于调试
-        log_debug(f"原始内容前100字符: {content[:100].replace('\n', ' ')}...")
+        content_preview = content[:100].replace('\n', ' ')
+        log_debug(f"原始内容前100字符: {content_preview}...")
         
         # 优先使用传统HTML转图片功能
         if PLAYWRIGHT_AVAILABLE:
