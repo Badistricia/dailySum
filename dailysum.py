@@ -643,16 +643,31 @@ async def generate_image_summary(title, content, date_str):
     log_info(f"开始生成图片摘要，日期: {date_str}")
     
     try:
+        # 如果内容为空，直接返回None
+        if not content or not content.strip():
+            log_warning("内容为空，无法生成图片摘要")
+            return None
+        
         # 优先使用传统HTML转图片功能
         if PLAYWRIGHT_AVAILABLE:
             log_info("使用HTML转图片功能生成日报...")
             html_path, image_path = await html_to_image(title, content, date_str)
             
             if image_path and os.path.exists(image_path):
+                # 检查图片文件大小，确保不是空白图片
+                file_size = os.path.getsize(image_path)
+                if file_size < 5000:  # 小于5KB的图片可能是空白或错误
+                    log_warning(f"生成的图片大小异常: {file_size} 字节，可能是空白图片")
+                    return None
+                
                 # 读取图片数据
                 with open(image_path, 'rb') as f:
                     image_data = f.read()
                 
+                if len(image_data) < 1000:  # 另一个检查点，确保数据不为空
+                    log_warning(f"图片数据异常小: {len(image_data)} 字节")
+                    return None
+                    
                 log_info(f"图片生成成功，大小: {len(image_data) / 1024:.2f} KB")
                 
                 # 清理临时文件
@@ -665,7 +680,7 @@ async def generate_image_summary(title, content, date_str):
                 
                 return image_data
             else:
-                log_warning("HTML图片生成失败，尝试生成文本报告")
+                log_warning("HTML图片生成失败，将使用文本报告")
                 return None
         else:
             log_warning("Playwright未安装，无法生成HTML图片")
@@ -760,9 +775,16 @@ async def execute_daily_summary(bot, target_groups=None, day_offset=0, start_hou
                 if PLAYWRIGHT_AVAILABLE:
                     log_info(f"使用传统HTML转图片功能生成日报...")
                     image_data = await generate_image_summary(title, summary, date_str)
+                    # 增加日志，确认图片数据是否正确
+                    if image_data:
+                        log_info(f"图片生成成功，大小: {len(image_data)/1024:.2f} KB")
+                    else:
+                        log_warning("图片生成失败或内容无法解析，将使用文本方式发送")
+                else:
+                    log_warning("Playwright不可用，使用文本方式发送")
                 
                 # 如果图片生成成功，则发送图片
-                if image_data:
+                if image_data and len(image_data) > 1000:  # 确保图片有足够的大小，不是空白图片
                     log_info(f"准备向群 {group_id} 发送图片日报...")
                     # 发送前缀消息
                     await bot.send_group_msg(
@@ -778,7 +800,7 @@ async def execute_daily_summary(bot, target_groups=None, day_offset=0, start_hou
                     log_info(f"成功向群 {group_id} 发送图片日报")
                 else:
                     # 如果图片生成失败，发送文本版
-                    log_info(f"图片生成失败，向群 {group_id} 发送文本日报...")
+                    log_info(f"图片生成失败或过小，向群 {group_id} 发送文本日报...")
                     message_to_send = f"【{date_str} 群聊日报】\n{message_prefix}{summary}"
                     await bot.send_group_msg(
                         group_id=int(group_id),
@@ -896,9 +918,16 @@ async def manual_summary(bot, ev, day_offset=0, target_group=None):
         if PLAYWRIGHT_AVAILABLE:
             log_info(f"使用传统HTML转图片功能生成日报...")
             image_data = await generate_image_summary(title, summary, date_str)
+            # 增加日志，确认图片数据是否正确
+            if image_data:
+                log_info(f"图片生成成功，大小: {len(image_data)/1024:.2f} KB")
+            else:
+                log_warning("图片生成失败或内容无法解析，将使用文本方式发送")
+        else:
+            log_warning("Playwright不可用，使用文本方式发送")
         
         # 如果图片生成成功，则发送图片
-        if image_data:
+        if image_data and len(image_data) > 1000:  # 确保图片有足够的大小，不是空白图片
             log_info(f"准备向群 {current_group_id} 发送图片日报...")
             # 发送前缀消息
             await bot.send(ev, f"【{title}】")
@@ -908,7 +937,7 @@ async def manual_summary(bot, ev, day_offset=0, target_group=None):
             log_info(f"成功发送群 {target_group} 的图片日报到群 {current_group_id}")
         else:
             # 如果图片生成失败，发送文本版
-            log_info(f"图片生成失败，发送文本日报...")
+            log_info(f"图片生成失败或过小，发送文本日报...")
             message_to_send = f"【{title}】\n\n{summary}"
             await bot.send_group_msg(
                 group_id=int(current_group_id),
