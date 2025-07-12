@@ -25,7 +25,6 @@ try:
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
 
-# import html2image # 暂时禁用图片功能
 from apscheduler.triggers.cron import CronTrigger
 from nonebot import scheduler
 from nonebot.message import MessageSegment
@@ -34,13 +33,8 @@ from hoshino import priv, logger, get_bot
 from .config import *
 from .logger_helper import log_debug, log_info, log_warning, log_error_msg, log_critical, logged
 
-# 导入HTML图片日报功能
-from .test_html_report_2 import (
-    init_playwright,
-    get_font_path,
-    preprocess_content,
-    html_to_screenshot
-)
+# 导入HTML图片日报功能所需函数
+from .test_html_report_2 import init_playwright, get_font_path, preprocess_content, html_to_screenshot
 
 # 初始化Playwright（异步启动）
 async def init_dailysum_playwright():
@@ -328,60 +322,6 @@ LOG_DIR = os.path.join(os.path.dirname(__file__), 'logs')
 os.makedirs(LOG_DIR, exist_ok=True)
 
 LOG_PATTERN = r'\[(.*?) nonebot\] INFO: Self: (.*?), Message (.*?) from (.*?)@\[群:(.*?)\]: \'(.*?)\'$'
-
-
-# 创建HTML文本样式
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>群聊日报</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 20px;
-            background-color: #f8f9fa;
-            color: #333;
-            line-height: 1.6;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background-color: white;
-            padding: 20px 30px;
-            border-radius: 10px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            color: #4a6bdf;
-            text-align: center;
-            border-bottom: 2px solid #eaeaea;
-            padding-bottom: 10px;
-            margin-top: 0;
-        }
-        .summary {
-            white-space: pre-wrap;
-            padding: 10px 0;
-        }
-        .footer {
-            text-align: center;
-            font-size: 0.8em;
-            margin-top: 20px;
-            color: #888;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>{title}</h1>
-        <div class="summary">{content}</div>
-        <div class="footer">由AI生成 · {date}</div>
-    </div>
-</body>
-</html>
-"""
 
 # 深度学习客户端
 class DeepSeekClient:
@@ -1434,10 +1374,10 @@ async def handle_daily_report_cmd(bot, ev, msg):
                 json.dump({'browser_path': browser_path}, f, ensure_ascii=False, indent=2)
             
             # 重新加载配置
-            from .test_html_report_2 import load_browser_config
-            if load_browser_config():
+            try:
+                # 保存后直接使用
                 await bot.send(ev, f'浏览器路径已设置: {browser_path}')
-            else:
+            except Exception as e:
                 await bot.send(ev, f'浏览器路径已保存，但加载失败，请检查路径是否正确')
         except Exception as e:
             log_error_msg(f"保存浏览器配置失败: {str(e)}")
@@ -1461,8 +1401,6 @@ async def handle_daily_report_cmd(bot, ev, msg):
 - 状态：查看日报配置状态
 - 测试：手动生成今日日报
 - 测试 群号：生成指定群的今日日报
-- 测试日报2：生成HTML版测试日报
-- 测试日报3/测试日报AI：使用AI直接生成HTML版日报
 - 昨日：生成昨天的日报
 - 昨日 群号：生成指定群昨天的日报
 - 前日：生成前天的日报
