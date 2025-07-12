@@ -81,32 +81,41 @@ async def html_to_image(title, content, date_str):
             log_warning("预处理内容失败，使用文本方式生成报告")
             return None, None
         
-        # 转义内容中的大括号，防止格式化错误 - 更彻底的处理
-        processed_content = processed_content.replace("{", "{{").replace("}", "}}")
-        
-        # 内容需要转义，供JavaScript处理
-        content_escaped = processed_content.replace('\\', '\\\\').replace('`', '\\`')
+        # 解析内容，提取各部分
+        log_info("解析内容，提取各部分...")
+        sections = parse_content_sections(processed_content)
         
         # 使用更安全的方式构建HTML内容，避免直接使用format
         try:
             # 尝试生成完整的HTML - 显式指定所有参数
             log_info("使用黑色背景模板生成HTML...")
-            html_content = DARK_HTML_TEMPLATE.format(
+            html_content = SIMPLE_DARK_HTML_TEMPLATE.format(
                 title=title,
-                content_escaped=content_escaped,
+                topics_content=sections["topics"],
+                important_content=sections["important"],
+                quotes_content=sections["quotes"],
+                summary_content=sections["summary"],
                 date=date_str,
                 font_path=font_path
             )
         except KeyError as ke:
             log_error_msg(f"格式化HTML时发生KeyError错误: {ke}")
             log_error_msg(f"尝试的参数: title={title[:20]}..., date={date_str}, font_path={font_path}")
-            # 第二种尝试方法 - 手动替换
-            html_content = DARK_HTML_TEMPLATE
-            html_content = html_content.replace("{title}", title)
-            html_content = html_content.replace("{content_escaped}", content_escaped)
-            html_content = html_content.replace("{date}", date_str)
-            html_content = html_content.replace("{font_path}", font_path)
-            log_info("使用手动替换方法构建HTML成功")
+            
+            # 第二种尝试方法 - 手动替换关键变量
+            try:
+                html_content = SIMPLE_DARK_HTML_TEMPLATE
+                html_content = html_content.replace("{title}", title)
+                html_content = html_content.replace("{topics_content}", sections["topics"])
+                html_content = html_content.replace("{important_content}", sections["important"])
+                html_content = html_content.replace("{quotes_content}", sections["quotes"])
+                html_content = html_content.replace("{summary_content}", sections["summary"])
+                html_content = html_content.replace("{date}", date_str)
+                html_content = html_content.replace("{font_path}", font_path)
+                log_info("使用手动替换方法构建HTML成功")
+            except Exception as e:
+                log_error_msg(f"手动替换HTML变量失败: {str(e)}")
+                return None, None
         
         # 保存HTML文件
         temp_html_path = os.path.join(DATA_DIR, f"report_{date_str}.html")
@@ -159,6 +168,157 @@ async def html_to_image(title, content, date_str):
         log_error_msg(f"HTML转图片过程中出错: {str(e)}")
         log_error_msg(f"完整错误堆栈:\n{error_msg}")
         return None, None
+
+# 解析内容，提取各部分
+def parse_content_sections(content):
+    """
+    解析内容，提取各部分
+    :param content: 预处理后的内容
+    :return: 包含各部分内容的字典
+    """
+    log_info("开始解析内容，提取各部分...")
+    
+    # 默认内容
+    default_content = "<p>无内容</p>"
+    
+    # 初始化结果
+    result = {
+        "topics": default_content,
+        "important": default_content,
+        "quotes": default_content,
+        "summary": default_content
+    }
+    
+    # 定义各部分的标题关键词
+    section_keywords = {
+        "topics": ["聊天活跃度", "活跃度", "今日热点话题", "热点话题", "今日话题", "话题分析", "群聊热点"],
+        "important": ["重要消息", "重要通知", "重要事项", "关键信息"],
+        "quotes": ["金句", "精彩发言", "经典语录", "情感分析", "互动亮点", "精彩语录"],
+        "summary": ["总结", "聊天总结", "日报总结", "整体总结", "今日总结"]
+    }
+    
+    # 提取各部分内容
+    import re
+    
+    # 方法1：按【标题】分割
+    sections = {}
+    
+    # 查找所有【标题】
+    section_matches = re.finditer(r'【([^】]+)】', content)
+    section_positions = []
+    
+    for match in section_matches:
+        title = match.group(1)
+        start_pos = match.start()
+        
+        # 确定这个标题属于哪个部分
+        for section, keywords in section_keywords.items():
+            if any(keyword in title for keyword in keywords):
+                section_positions.append((start_pos, section, match.group(0)))
+                break
+    
+    # 按位置排序
+    section_positions.sort()
+    
+    # 提取各部分内容
+    for i, (start_pos, section, title) in enumerate(section_positions):
+        # 确定结束位置
+        if i < len(section_positions) - 1:
+            end_pos = section_positions[i + 1][0]
+        else:
+            end_pos = len(content)
+        
+        # 提取内容
+        section_content = content[start_pos + len(title):end_pos].strip()
+        
+        # 格式化内容
+        formatted_content = format_content_html(section_content)
+        
+        # 保存到对应部分
+        sections[section] = formatted_content
+    
+    # 如果没有找到任何部分，尝试使用整个内容
+    if not sections:
+        log_warning("未找到任何标题部分，尝试使用整个内容...")
+        
+        # 尝试提取列表项
+        list_items = re.findall(r'(?:^|\n)[\s]*[-•*][\s]+.+(?:\n|$)', content)
+        if list_items:
+            formatted_content = format_content_html("\n".join(list_items))
+            result["topics"] = formatted_content
+        else:
+            # 使用整个内容
+            formatted_content = format_content_html(content)
+            result["topics"] = formatted_content
+    else:
+        # 更新结果
+        for section, content in sections.items():
+            result[section] = content
+    
+    return result
+
+# 格式化内容为HTML
+def format_content_html(text):
+    """
+    将文本格式化为HTML
+    :param text: 文本内容
+    :return: HTML内容
+    """
+    if not text or not text.strip():
+        return "<p>无内容</p>"
+    
+    # 移除多余的【标题】标记
+    import re
+    text = re.sub(r'【[^】]+】', '', text)
+    text = re.sub(r'^\s*[:-]\s*', '', text, flags=re.MULTILINE)
+    text = text.strip()
+    
+    if not text:
+        return "<p>无内容</p>"
+    
+    # 处理列表项
+    text = re.sub(r'^[\s]*[-*•][\s]+(.+?)$', r'<li>\1</li>', text, flags=re.MULTILINE)
+    text = re.sub(r'^[\s]*(\d+)[\.)、][\s]+(.+?)$', r'<li>\2</li>', text, flags=re.MULTILINE)
+    text = re.sub(r'^[\s]*[-](.+?)$', r'<li>\1</li>', text, flags=re.MULTILINE)
+    
+    # 构建HTML
+    result = []
+    in_list = False
+    
+    # 分行处理
+    lines = text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            if in_list:
+                result.append('</ul>')
+                in_list = False
+            continue
+        
+        if line.startswith('<li>'):
+            if not in_list:
+                result.append('<ul>')
+                in_list = True
+            result.append(line)
+        else:
+            if in_list:
+                result.append('</ul>')
+                in_list = False
+            
+            result.append(f'<p>{line}</p>')
+    
+    # 关闭未闭合的列表
+    if in_list:
+        result.append('</ul>')
+    
+    # 合并结果
+    html = '\n'.join(result)
+    
+    # 如果结果为空，返回原始文本
+    if not html.strip():
+        html = f'<p>{text.strip()}</p>'
+    
+    return html
 
 # 确保data目录存在
 os.makedirs(DATA_DIR, exist_ok=True)
