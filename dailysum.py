@@ -419,11 +419,13 @@ class GeminiClient:
         while retry_count < max_retries:
             try:
                 log_debug(f"尝试API请求 (尝试 {retry_count + 1}/{max_retries})...")
-                # 使用旧版的 generate_text 方法
-                response = await asyncio.to_thread(
+                # 使用旧版的 generate_text 方法，并用 run_in_executor 异步执行
+                loop = asyncio.get_running_loop()
+                response = await loop.run_in_executor(
+                    None,  # 使用默认的线程池执行器
                     genai.generate_text,
-                    prompt=prompt,
-                    model='models/gemini-pro'  # 旧版SDK需要指定完整的模型名称
+                    prompt,
+                    'models/gemini-pro' # 指定模型
                 )
                 content = response.result
                 log_info(f"Gemini 生成成功，生成内容长度: {len(content)}")
