@@ -370,7 +370,7 @@ SIMPLE_DARK_HTML_TEMPLATE = """
 """ 
 
 # Gemini 配置
-GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"  # Gemini API密钥
+GEMINI_API_KEY = "AIzaSyCJGCR32LWR_Fk8OBNQaY3qdxlIFxY5KuY"  # Gemini API密钥
 
 PROMPT_WEEKLY_TEMPLATE = """请根据【{group_name}】过去一周的聊天记录，整理一份QQ群周报，要求：
 
