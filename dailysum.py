@@ -424,7 +424,7 @@ class GeminiClient:
                 func = functools.partial(
                     genai.generate_text,
                     prompt=prompt,
-                    model_name=GEMINI_MODEL # 使用配置中的模型名称
+                    model=GEMINI_MODEL # 正确的参数名是 model
                 )
                 loop = asyncio.get_running_loop()
                 response = await loop.run_in_executor(None, func)
