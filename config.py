@@ -372,7 +372,7 @@ SIMPLE_DARK_HTML_TEMPLATE = """
 # Gemini 配置
 # Gemini 配置
 GEMINI_API_KEY = "AIzaSyCJGCR32LWR_Fk8OBNQaY3qdxlIFxY5KuY"  # Gemini API密钥
-GEMINI_MODEL = "models/gemini-pro"  # Gemini 模型名称
+GEMINI_MODEL = "models/gemini-2.5-flash"  # Gemini 模型名称
 
 PROMPT_WEEKLY_TEMPLATE = """请根据【{group_name}】过去一周的聊天记录，整理一份QQ群周报，要求：
 
