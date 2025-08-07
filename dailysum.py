@@ -4,6 +4,7 @@ import json
 import datetime
 import asyncio
 import traceback
+import functools
 from datetime import datetime, timedelta, date
 import httpx
 from PIL import Image
@@ -419,14 +420,15 @@ class GeminiClient:
         while retry_count < max_retries:
             try:
                 log_debug(f"尝试API请求 (尝试 {retry_count + 1}/{max_retries})...")
-                # 使用旧版的 generate_text 方法，并用 run_in_executor 异步执行
-                loop = asyncio.get_running_loop()
-                response = await loop.run_in_executor(
-                    None,  # 使用默认的线程池执行器
+                # 使用 functools.partial 来包装带关键字参数的同步函数
+                func = functools.partial(
                     genai.generate_text,
-                    prompt,
-                    'models/gemini-pro' # 指定模型
+                    prompt=prompt,
+                    model_name=GEMINI_MODEL # 使用配置中的模型名称
                 )
+                loop = asyncio.get_running_loop()
+                response = await loop.run_in_executor(None, func)
+                
                 content = response.result
                 log_info(f"Gemini 生成成功，生成内容长度: {len(content)}")
                 log_debug(f"生成内容前100字符: {content[:100]}...")
@@ -1505,7 +1507,6 @@ async def handle_daily_report_cmd(bot, ev, msg):
             await bot.send(ev, summary)
         else:
             await bot.send(ev, "周报生成失败，请稍后再试。")
-        await bot.send(ev, help_text)
         
     else:
         # 未知命令
