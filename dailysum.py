@@ -4,12 +4,13 @@ import json
 import datetime
 import asyncio
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import httpx
 from PIL import Image
 import io
 import base64
 import shutil
+import google.generativeai as genai
 
 # 猴子补丁，用于修复html2image在Python 3.8下的兼容性问题
 import sys
@@ -399,6 +400,69 @@ class DeepSeekClient:
 
 # AI客户端实例
 ai_client = DeepSeekClient(AI_API_KEY)
+
+# Gemini 客户端
+class GeminiClient:
+    def __init__(self, api_key):
+        self.api_key = api_key
+        genai.configure(api_key=self.api_key)
+        log_info(f"GeminiClient 初始化完成，API Key: {'已设置' if api_key else '未设置'}")
+
+    async def generate(self, prompt, max_retries=3, timeout=120.0):
+        log_info(f"开始使用 Gemini 生成周报")
+        log_debug(f"提示词: {prompt[:200]}...")
+        
+        request_size = len(prompt.encode('utf-8'))
+        log_info(f"请求数据大小: {request_size / 1024:.2f} KB")
+
+        retry_count = 0
+        while retry_count < max_retries:
+            try:
+                log_debug(f"尝试API请求 (尝试 {retry_count + 1}/{max_retries})...")
+                # 使用旧版的 generate_text 方法
+                response = await asyncio.to_thread(
+                    genai.generate_text,
+                    prompt=prompt,
+                    model='models/gemini-pro'  # 旧版SDK需要指定完整的模型名称
+                )
+                content = response.result
+                log_info(f"Gemini 生成成功，生成内容长度: {len(content)}")
+                log_debug(f"生成内容前100字符: {content[:100]}...")
+                return content
+            except Exception as e:
+                log_error_msg(f"Gemini API调用出错: {str(e)}")
+                log_error_msg(traceback.format_exc())
+                retry_count += 1
+                await asyncio.sleep(2)
+        
+        log_error_msg(f"达到最大重试次数 ({max_retries})，Gemini 生成失败")
+        return None
+
+gemini_client = GeminiClient(GEMINI_API_KEY)
+
+async def get_weekly_log_content(group_id: str) -> str:
+    """获取指定群过去7天的日志内容"""
+    today = date.today()
+    chat_logs = []
+    for i in range(7):
+        current_date = today - timedelta(days=i)
+        date_str = current_date.strftime('%Y-%m-%d')
+        log_file_path = os.path.join(DATA_DIR, f"{group_id}_{date_str}.json")
+        if os.path.exists(log_file_path):
+            try:
+                with open(log_file_path, 'r', encoding='utf-8') as f:
+                    messages = json.load(f)
+                    chat_logs.extend(messages)
+            except Exception as e:
+                log_warning(f"读取日志文件 {log_file_path} 失败: {e}")
+    
+    if not chat_logs:
+        return ""
+        
+    # 按时间排序
+    chat_logs.sort(key=lambda x: x.get('time', ''))
+    
+    return optimize_chat_format(chat_logs)
 
 # 从系统日志获取群聊消息
 @logged
@@ -1407,9 +1471,38 @@ async def handle_daily_report_cmd(bot, ev, msg):
 - 前日 群号：生成指定群前天的日报
 - 指定 N：生成N天前的日报
 - 指定 N 群号：生成指定群N天前的日报
+- 周报：生成本群的周报
+- 周报 群号：生成指定群的周报
 - 设置浏览器 路径：设置自定义浏览器路径
 - 初始化playwright：手动初始化Playwright
 - 帮助：显示本帮助信息"""
+        await bot.send(ev, help_text)
+
+    elif msg.startswith('周报'):
+        parts = msg.split()
+        target_group_id = str(ev['group_id'])
+        if len(parts) >= 2 and parts[1].isdigit():
+            target_group_id = parts[1]
+
+        await bot.send(ev, f"正在为群 {target_group_id} 生成周报，这可能需要几分钟时间，请耐心等待...")
+        
+        chat_log = await get_weekly_log_content(target_group_id)
+        
+        if not chat_log:
+            await bot.send(ev, f"未找到群 {target_group_id} 的周报数据。")
+            return
+
+        prompt = PROMPT_WEEKLY_TEMPLATE.format(
+            group_name=target_group_id,
+            chat_log=chat_log
+        )
+        
+        summary = await gemini_client.generate(prompt)
+        
+        if summary:
+            await bot.send(ev, summary)
+        else:
+            await bot.send(ev, "周报生成失败，请稍后再试。")
         await bot.send(ev, help_text)
         
     else:
